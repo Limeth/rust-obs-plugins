@@ -1,10 +1,11 @@
 use super::ObsString;
+use std::path::PathBuf;
 use obs_sys::{
     obs_data_t, obs_properties_t, obs_property_t,
-    obs_data_get_bool, obs_data_get_double, obs_data_get_int, obs_data_get_json,
-    obs_properties_add_float, obs_properties_add_float_slider, obs_properties_add_int, obs_properties_add_int_slider, obs_properties_add_bool,
+    obs_data_get_bool, obs_data_get_double, obs_data_get_int, obs_data_get_json, obs_data_get_string,
+    obs_properties_add_float, obs_properties_add_float_slider, obs_properties_add_int, obs_properties_add_int_slider, obs_properties_add_bool, obs_properties_add_text, obs_properties_add_path,
 };
-use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString, OsString};
 use std::os::raw::c_char;
 use serde_json::Value;
 
@@ -122,14 +123,78 @@ pub mod property_descriptors {
         }
     }
 
-    // TODO: Implement the property kinds below
+    #[repr(u32)]
+    #[derive(Clone, Copy)]
+    pub enum StringType {
+        Default,
+        Password,
+        Multiline,
+    }
+
     #[derive(Clone)]
-    pub struct PropertyDescriptorString {}
+    pub struct PropertyDescriptorString {
+        pub string_type: StringType,
+    }
+
+    impl PropertyDescriptor for PropertyDescriptorString {
+        unsafe fn create_property(&self, name: *const c_char, description: *const c_char, properties: *mut obs_properties_t) -> *mut obs_property_t {
+            obs_properties_add_text(
+                properties,
+                name,
+                description,
+                self.string_type as u32,
+            )
+        }
+    }
+
+    impl ValuePropertyDescriptor for PropertyDescriptorString {
+        type ValueType = String;
+
+        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t) -> Self::ValueType {
+            CStr::from_ptr(obs_data_get_string(data, name)).to_string_lossy().to_string()
+        }
+    }
+
+    #[repr(u32)]
+    #[derive(Clone, Copy)]
+    pub enum PathType {
+        File,
+        FileSave,
+        Directory,
+    }
+
     #[derive(Clone)]
     pub struct PropertyDescriptorPath {
-        pub filter: String,
-        pub default_path: String,
+        pub path_type: PathType,
+        pub filter: CString,
+        pub default_path: CString,
     }
+
+    impl PropertyDescriptor for PropertyDescriptorPath {
+        unsafe fn create_property(&self, name: *const c_char, description: *const c_char, properties: *mut obs_properties_t) -> *mut obs_property_t {
+            obs_properties_add_path(
+                properties,
+                name,
+                description,
+                self.path_type as u32,
+                self.filter.as_ptr(),
+                self.default_path.as_ptr(),
+            )
+        }
+    }
+
+    impl ValuePropertyDescriptor for PropertyDescriptorPath {
+        type ValueType = PathBuf;
+
+        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t) -> Self::ValueType {
+            let c_slice = CStr::from_ptr(obs_data_get_string(data, name)).to_string_lossy();
+            let os_string = OsString::from(c_slice.to_string());
+
+            PathBuf::from(os_string)
+        }
+    }
+
+    // TODO: Implement the property kinds below
     #[derive(Clone)]
     pub struct PropertyDescriptorList {
         // TODO
@@ -210,81 +275,6 @@ impl Properties {
             descriptor: property_descriptor,
         }
     }
-
-    // pub fn add_float_slider(
-    //     &mut self,
-    //     name: ObsString,
-    //     description: ObsString,
-    //     min: f64,
-    //     max: f64,
-    //     step: f64,
-    // ) -> &mut Self {
-    //     unsafe {
-    //         self.properties.push(Property {
-    //             name: name.as_str(),
-    //             property_type: PropertyType::Float(min, max),
-    //         });
-    //         obs_properties_add_float_slider(
-    //             self.pointer,
-    //             name.as_ptr(),
-    //             description.as_ptr(),
-    //             min,
-    //             max,
-    //             step,
-    //         );
-    //     }
-    //     self
-    // }
-
-    // pub fn add_float(
-    //     &mut self,
-    //     name: ObsString,
-    //     description: ObsString,
-    //     min: f64,
-    //     max: f64,
-    //     step: f64,
-    // ) -> &mut Self {
-    //     unsafe {
-    //         self.properties.push(Property {
-    //             name: name.as_str(),
-    //             property_type: PropertyType::Float(min, max),
-    //         });
-    //         obs_properties_add_float(
-    //             self.pointer,
-    //             name.as_ptr(),
-    //             description.as_ptr(),
-    //             min,
-    //             max,
-    //             step,
-    //         );
-    //     }
-    //     self
-    // }
-
-    // pub fn add_int(
-    //     &mut self,
-    //     name: ObsString,
-    //     description: ObsString,
-    //     min: i32,
-    //     max: i32,
-    //     step: i32,
-    // ) -> &mut Self {
-    //     unsafe {
-    //         self.properties.push(Property {
-    //             name: name.as_str(),
-    //             property_type: PropertyType::Int(min, max),
-    //         });
-    //         obs_properties_add_int(
-    //             self.pointer,
-    //             name.as_ptr(),
-    //             description.as_ptr(),
-    //             min,
-    //             max,
-    //             step,
-    //         );
-    //     }
-    //     self
-    // }
 }
 
 pub struct SettingsContext {
@@ -330,64 +320,4 @@ impl SettingsContext {
             <T as ValuePropertyDescriptor>::get_property_value(property.name.as_ptr(), self.settings)
         }
     }
-
-    // pub fn get_float(&mut self, param: ObsString) -> Option<f64> {
-    //     if let Some(Property {
-    //         property_type: PropertyType::Float(min, max),
-    //         ..
-    //     }) = self
-    //         .properties
-    //         .iter()
-    //         .filter(|p| {
-    //             matches!(p.property_type, PropertyType::Float(_, _)) && p.name == param.as_str()
-    //         })
-    //         .next()
-    //     {
-    //         Some(
-    //             (unsafe { obs_data_get_double(self.settings, param.as_ptr()) })
-    //                 .min(*max)
-    //                 .max(*min),
-    //         )
-    //     } else {
-    //         if let Some(data) = self.get_data() {
-    //             let param = param.as_str();
-    //             if let Some(val) = data.get(&param[..param.len() - 1]) {
-    //                 return val.as_f64();
-    //             }
-    //         }
-
-    //         None
-    //     }
-    // }
-
-    // pub fn get_int(&mut self, param: ObsString) -> Option<i32> {
-    //     if let Some(Property {
-    //         property_type: PropertyType::Int(min, max),
-    //         ..
-    //     }) = self
-    //         .properties
-    //         .iter()
-    //         .filter(|p| {
-    //             matches!(p.property_type, PropertyType::Int(_, _)) && p.name == param.as_str()
-    //         })
-    //         .next()
-    //     {
-    //         Some(
-    //             (unsafe { obs_data_get_int(self.settings, param.as_ptr()) } as i32)
-    //                 .min(*max)
-    //                 .max(*min),
-    //         )
-    //     } else {
-    //         if let Some(data) = self.get_data() {
-    //             let param = param.as_str();
-    //             if let Some(val) = data.get(&param[..param.len() - 1]) {
-    //                 if let Some(val) = val.as_i64() {
-    //                     return Some(val as i32);
-    //                 }
-    //             }
-    //         }
-
-    //         None
-    //     }
-    // }
 }
