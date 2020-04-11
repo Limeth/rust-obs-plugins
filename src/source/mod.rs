@@ -18,7 +18,7 @@ use obs_sys::{
     obs_source_process_filter_end, obs_source_skip_video_filter, obs_source_t, obs_source_type,
     obs_source_type_OBS_SOURCE_TYPE_FILTER, obs_source_type_OBS_SOURCE_TYPE_INPUT,
     obs_source_type_OBS_SOURCE_TYPE_SCENE, obs_source_type_OBS_SOURCE_TYPE_TRANSITION,
-    obs_source_update, OBS_SOURCE_VIDEO
+    obs_source_update, OBS_SOURCE_VIDEO, obs_icon_type_OBS_ICON_TYPE_UNKNOWN
 };
 
 use super::{
@@ -220,6 +220,18 @@ impl<T: Sourceable, D> SourceInfoBuilder<T, D> {
                 get_defaults2: None,
                 get_properties2: None,
                 audio_mix: None,
+                icon_type: obs_icon_type_OBS_ICON_TYPE_UNKNOWN,
+                media_play_pause: None,
+                media_restart: None,
+                media_stop: None,
+                media_next: None,
+                media_previous: None,
+                media_get_duration: None,
+                media_get_time: None,
+                media_set_time: None,
+                media_get_state: None,
+                version: 0,
+                unversioned_id: std::ptr::null(),
             },
         }
     }
