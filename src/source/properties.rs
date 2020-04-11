@@ -2,10 +2,11 @@ use std::path::PathBuf;
 use obs_sys::{
     obs_data_t, obs_properties_t, obs_property_t,
     obs_data_get_bool, obs_data_get_double, obs_data_get_int, obs_data_get_json, obs_data_get_string,
+    obs_data_set_bool, obs_data_set_double, obs_data_set_int, obs_data_set_string,
     obs_properties_add_float, obs_properties_add_float_slider, obs_properties_add_int, obs_properties_add_int_slider, obs_properties_add_bool, obs_properties_add_text, obs_properties_add_path,
 };
 use std::ffi::{CStr, CString, OsString};
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_longlong};
 use serde_json::Value;
 
 pub mod property_descriptors {
@@ -19,6 +20,7 @@ pub mod property_descriptors {
         type ValueType;
 
         unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t) -> Self::ValueType;
+        unsafe fn set_property_value(name: *const c_char, data: *mut obs_data_t, value: Self::ValueType);
     }
 
     #[derive(Clone)]
@@ -39,6 +41,10 @@ pub mod property_descriptors {
 
         unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t) -> Self::ValueType {
             obs_data_get_bool(data, name)
+        }
+
+        unsafe fn set_property_value(name: *const c_char, data: *mut obs_data_t, value: Self::ValueType) {
+            obs_data_set_bool(data, name, value);
         }
     }
 
@@ -80,6 +86,10 @@ pub mod property_descriptors {
         unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t) -> Self::ValueType {
             obs_data_get_int(data, name) as i32
         }
+
+        unsafe fn set_property_value(name: *const c_char, data: *mut obs_data_t, value: Self::ValueType) {
+            obs_data_set_int(data, name, value as c_longlong);
+        }
     }
 
     #[derive(Clone)]
@@ -120,6 +130,10 @@ pub mod property_descriptors {
         unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t) -> Self::ValueType {
             obs_data_get_double(data, name)
         }
+
+        unsafe fn set_property_value(name: *const c_char, data: *mut obs_data_t, value: Self::ValueType) {
+            obs_data_set_double(data, name, value);
+        }
     }
 
     #[repr(u32)]
@@ -151,6 +165,11 @@ pub mod property_descriptors {
 
         unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t) -> Self::ValueType {
             CStr::from_ptr(obs_data_get_string(data, name)).to_string_lossy().to_string()
+        }
+
+        unsafe fn set_property_value(name: *const c_char, data: *mut obs_data_t, value: Self::ValueType) {
+            let c_string = CString::new(value).expect("Could not convert string to C string.");
+            obs_data_set_string(data, name, c_string.as_ptr());
         }
     }
 
@@ -190,6 +209,12 @@ pub mod property_descriptors {
             let os_string = OsString::from(c_slice.to_string());
 
             PathBuf::from(os_string)
+        }
+
+        unsafe fn set_property_value(name: *const c_char, data: *mut obs_data_t, value: Self::ValueType) {
+            let c_string = CString::new(value.to_string_lossy().as_ref())
+                .expect("Could not convert string to C string.");
+            obs_data_set_string(data, name, c_string.as_ptr());
         }
     }
 
@@ -317,6 +342,12 @@ impl SettingsContext {
     pub fn get_property_value<T: ValuePropertyDescriptor>(&self, property: &Property<T>) -> T::ValueType {
         unsafe {
             <T as ValuePropertyDescriptor>::get_property_value(property.name.as_ptr(), self.settings)
+        }
+    }
+
+    pub fn set_property_value<T: ValuePropertyDescriptor>(&self, property: &Property<T>, value: T::ValueType) {
+        unsafe {
+            <T as ValuePropertyDescriptor>::set_property_value(property.name.as_ptr(), self.settings, value);
         }
     }
 }
