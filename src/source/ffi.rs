@@ -12,14 +12,12 @@ use obs_sys::{
 
 struct DataWrapper<D> {
     data: Option<D>,
-    properties: Vec<Property>,
 }
 
 impl<D> Default for DataWrapper<D> {
     fn default() -> Self {
         Self {
             data: None,
-            properties: vec![],
         }
     }
 }
@@ -28,7 +26,6 @@ impl<D> From<D> for DataWrapper<D> {
     fn from(data: D) -> Self {
         Self {
             data: Some(data),
-            properties: vec![],
         }
     }
 }
@@ -62,7 +59,7 @@ pub unsafe extern "C" fn create<D, F: CreatableSource<D>>(
     source: *mut obs_source_t,
 ) -> *mut c_void {
     let mut wrapper = DataWrapper::default();
-    let mut settings = SettingsContext::from_raw(settings, &wrapper.properties);
+    let mut settings = SettingsContext::from_raw(settings);
 
     let source = SourceContext { source };
 
@@ -84,7 +81,7 @@ pub unsafe extern "C" fn update<D, F: UpdateSource<D>>(
 ) {
     let mut active = ActiveContext::default();
     let data: &mut DataWrapper<D> = &mut *(data as *mut DataWrapper<D>);
-    let mut settings = SettingsContext::from_raw(settings, &data.properties);
+    let mut settings = SettingsContext::from_raw(settings);
     F::update(&mut data.data, &mut settings, &mut active);
 }
 
@@ -118,7 +115,7 @@ pub unsafe extern "C" fn get_properties<D, F: GetPropertiesSource<D>>(
 ) -> *mut obs_properties {
     let wrapper: &mut DataWrapper<D> = &mut *(data as *mut DataWrapper<D>);
 
-    let mut properties = Properties::from_raw(obs_properties_create(), &mut wrapper.properties);
+    let mut properties = Properties::from_raw(obs_properties_create());
 
     F::get_properties(&mut wrapper.data, &mut properties);
 

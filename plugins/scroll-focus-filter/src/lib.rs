@@ -44,6 +44,13 @@ struct Data {
     screen_height: u32,
     screen_x: u32,
     screen_y: u32,
+
+    property_zoom: Option<Property<PropertyDescriptorF64>>,
+    property_screen_x: Option<Property<PropertyDescriptorI32>>,
+    property_screen_y: Option<Property<PropertyDescriptorI32>>,
+    property_screen_width: Option<Property<PropertyDescriptorI32>>,
+    property_screen_height: Option<Property<PropertyDescriptorI32>>,
+    property_animation_time: Option<Property<PropertyDescriptorF64>>,
 }
 
 impl Drop for Data {
@@ -73,48 +80,67 @@ impl GetNameSource<Data> for ScrollFocusFilter {
 
 impl GetPropertiesSource<Data> for ScrollFocusFilter {
     fn get_properties(_data: &mut Option<Data>, properties: &mut Properties) {
-        properties.add_float_slider(
-            obs_string!("zoom"),
-            obs_string!("Amount to zoom in window"),
-            1.,
-            5.,
-            0.001,
-        );
-        properties.add_int(
-            obs_string!("screen_x"),
-            obs_string!("Offset relative to top left screen - x"),
-            0,
-            3840 * 3,
-            1,
-        );
-        properties.add_int(
-            obs_string!("screen_y"),
-            obs_string!("Offset relative to top left screen - y"),
-            0,
-            3840 * 3,
-            1,
-        );
-        properties.add_int(
-            obs_string!("screen_width"),
-            obs_string!("Screen width"),
-            1,
-            3840 * 3,
-            1,
-        );
-        properties.add_int(
-            obs_string!("screen_height"),
-            obs_string!("Screen height"),
-            1,
-            3840 * 3,
-            1,
-        );
-        properties.add_float(
-            obs_string!("animation_time"),
-            obs_string!("Animation Time (s)"),
-            0.3,
-            10.,
-            0.001,
-        );
+        let data = _data.as_mut().unwrap();
+        data.property_zoom = Some(properties.add_property(
+            "zoom".to_string(),
+            "Amount to zoom in window".to_string(),
+            PropertyDescriptorF64 {
+                min: 1.0,
+                max: 5.0,
+                step: 0.001,
+                slider: true,
+            },
+        ));
+        data.property_screen_x = Some(properties.add_property(
+            "screen_x".to_string(),
+            "Offset relative to top left screen - x".to_string(),
+            PropertyDescriptorI32 {
+                min: 0,
+                max: 3840 * 3,
+                step: 1,
+                slider: false,
+            },
+        ));
+        data.property_screen_y = Some(properties.add_property(
+            "screen_y".to_string(),
+            "Offset relative to top left screen - y".to_string(),
+            PropertyDescriptorI32 {
+                min: 0,
+                max: 3840 * 3,
+                step: 1,
+                slider: false,
+            },
+        ));
+        data.property_screen_width = Some(properties.add_property(
+            "screen_width".to_string(),
+            "Screen width".to_string(),
+            PropertyDescriptorI32 {
+                min: 1,
+                max: 3840 * 3,
+                step: 1,
+                slider: false,
+            },
+        ));
+        data.property_screen_height = Some(properties.add_property(
+            "screen_height".to_string(),
+            "Screen height".to_string(),
+            PropertyDescriptorI32 {
+                min: 1,
+                max: 3840 * 3,
+                step: 1,
+                slider: false,
+            },
+        ));
+        data.property_animation_time = Some(properties.add_property(
+            "animation_time".to_string(),
+            "Animation Time (s)".to_string(),
+            PropertyDescriptorF64 {
+                min: 0.3,
+                max: 10.,
+                step: 0.001,
+                slider: false,
+            },
+        ));
     }
 }
 
@@ -250,25 +276,14 @@ impl CreatableSource<Data> for ScrollFocusFilter {
             if let Some(image) = effect.get_effect_param_by_name(obs_string!("image")) {
                 if let Some(add_val) = effect.get_effect_param_by_name(obs_string!("add_val")) {
                     if let Some(mul_val) = effect.get_effect_param_by_name(obs_string!("mul_val")) {
-                        let zoom = 1. / settings.get_float(obs_string!("zoom")).unwrap_or(1.);
+                        let zoom = 1.0;
+                        let screen_width = 1920;
+                        let screen_height = 1080;
+                        let screen_x = 0;
+                        let screen_y = 0;
+                        let animation_time = 0.3;
 
                         let sampler = GraphicsSamplerState::from(GraphicsSamplerInfo::default());
-
-                        let screen_width = settings
-                            .get_int(obs_string!("screen_width"))
-                            .unwrap_or(1920) as u32;
-                        let screen_height = settings
-                            .get_int(obs_string!("screen_height"))
-                            .unwrap_or(1080) as u32;
-
-                        let screen_x =
-                            settings.get_int(obs_string!("screen_x")).unwrap_or(0) as u32;
-                        let screen_y =
-                            settings.get_int(obs_string!("screen_y")).unwrap_or(0) as u32;
-
-                        let animation_time = settings
-                            .get_float(obs_string!("animation_time"))
-                            .unwrap_or(0.3);
 
                         let (send_filter, receive_filter) = unbounded::<FilterMessage>();
                         let (send_server, receive_server) = unbounded::<ServerMessage>();
@@ -324,6 +339,13 @@ impl CreatableSource<Data> for ScrollFocusFilter {
                             screen_width,
                             screen_x,
                             screen_y,
+
+                            property_zoom: None,
+                            property_screen_x: None,
+                            property_screen_y: None,
+                            property_screen_width: None,
+                            property_screen_height: None,
+                            property_animation_time: None,
                         };
                     }
                 }
@@ -343,28 +365,30 @@ impl UpdateSource<Data> for ScrollFocusFilter {
         _context: &mut ActiveContext,
     ) {
         if let Some(data) = data {
-            if let Some(zoom) = settings.get_float(obs_string!("zoom")) {
+            if let Some(zoom) = data.property_zoom.as_ref().map(|property| settings.get_property_value(property)) {
                 data.from_zoom = data.current_zoom;
                 data.internal_zoom = 1. / zoom;
                 data.target_zoom = 1. / zoom;
             }
 
-            if let Some(screen_width) = settings.get_int(obs_string!("screen_width")) {
+            if let Some(screen_width) = data.property_screen_width.as_ref().map(|property| settings.get_property_value(property)) {
                 data.screen_width = screen_width as u32;
             }
 
-            if let Some(animation_time) = settings.get_float(obs_string!("animation_time")) {
-                data.animation_time = animation_time;
-            }
-
-            if let Some(screen_height) = settings.get_int(obs_string!("screen_height")) {
+            if let Some(screen_height) = data.property_screen_height.as_ref().map(|property| settings.get_property_value(property)) {
                 data.screen_height = screen_height as u32;
             }
-            if let Some(screen_x) = settings.get_int(obs_string!("screen_x")) {
+
+            if let Some(screen_x) = data.property_screen_x.as_ref().map(|property| settings.get_property_value(property)) {
                 data.screen_x = screen_x as u32;
             }
-            if let Some(screen_y) = settings.get_int(obs_string!("screen_y")) {
+
+            if let Some(screen_y) = data.property_screen_y.as_ref().map(|property| settings.get_property_value(property)) {
                 data.screen_y = screen_y as u32;
+            }
+
+            if let Some(animation_time) = data.property_animation_time.as_ref().map(|property| settings.get_property_value(property)) {
+                data.animation_time = animation_time;
             }
         }
     }
