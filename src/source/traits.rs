@@ -1,16 +1,15 @@
 use super::context::{ActiveContext, VideoRenderContext};
 use super::properties::{Properties, SettingsContext};
 use super::{EnumActiveContext, EnumAllContext, SourceContext, SourceType};
-
-use crate::string::ObsString;
+use std::ffi::CStr;
 
 pub trait Sourceable {
-    fn get_id() -> ObsString;
+    fn get_id() -> &'static CStr;
     fn get_type() -> SourceType;
 }
 
 pub trait GetNameSource<D> {
-    fn get_name() -> ObsString;
+    fn get_name() -> &'static CStr;
 }
 
 pub trait GetWidthSource<D> {

@@ -31,7 +31,7 @@
 //!     // Macro for registering modules
 //!     obs_register_module,
 //!     // Macro for creating strings
-//!     obs_string,
+//!     cstr,
 //! };
 //!
 //! // The module that will handle creating the source.
@@ -48,8 +48,8 @@
 //! // Implement the Sourceable trait for TestSource, this is required for each source.
 //! // It allows you to specify the source ID and type.
 //! impl Sourceable for TestSource {
-//!     fn get_id() -> ObsString {
-//!         obs_string!("test_source")
+//!     fn get_id() -> &'static CStr {
+//!         cstr!("test_source")
 //!     }
 //!
 //!     fn get_type() -> SourceType {
@@ -59,8 +59,8 @@
 //!
 //! // Allow OBS to show a name for the source
 //! impl GetNameSource<SourceData> for TestSource {
-//!     fn get_name() -> ObsString {
-//!         obs_string!("Test Source")
+//!     fn get_name() -> &'static CStr {
+//!         cstr!("Test Source")
 //!     }
 //! }
 //!
@@ -92,16 +92,16 @@
 //!         true
 //!     }
 //!    
-//!     fn description() -> ObsString {
-//!         obs_string!("A great test module.")
+//!     fn description() -> &'static CStr {
+//!         cstr!("A great test module.")
 //!     }
 //!
-//!     fn name() -> ObsString {
-//!         obs_string!("Test Module")
+//!     fn name() -> &'static CStr {
+//!         cstr!("Test Module")
 //!     }
 //!
-//!     fn author() -> ObsString {
-//!         obs_string!("Bennett")
+//!     fn author() -> &'static CStr {
+//!         cstr!("Bennett")
 //!     }
 //! }
 //! ~~~
@@ -114,6 +114,7 @@
 
 /// Raw bindings of OBS C API
 pub use obs_sys;
+pub use cstr::*;
 
 /// Tools required for manipulating graphics in OBS
 pub mod graphics;
@@ -123,12 +124,10 @@ pub mod log;
 pub mod module;
 /// Tools for creating sources
 pub mod source;
-/// String macros
-pub mod string;
 
 /// Re-exports of a bunch of popular tools
 pub mod prelude {
     pub use crate::module::*;
     pub use crate::source::context::*;
-    pub use crate::string::*;
+    pub use cstr::*;
 }

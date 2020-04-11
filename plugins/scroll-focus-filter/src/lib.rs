@@ -1,10 +1,9 @@
 mod server;
 
 use server::{Server, WindowSnapshot};
-
-use obs_wrapper::{graphics::*, obs_register_module, obs_string, prelude::*, source::*};
-
+use obs_wrapper::{graphics::*, obs_register_module, prelude::*, source::*};
 use crossbeam_channel::{unbounded, Receiver, Sender};
+use std::ffi::{CStr, CString};
 
 enum FilterMessage {
     CloseConnection,
@@ -64,8 +63,8 @@ struct ScrollFocusFilter {
 }
 
 impl Sourceable for ScrollFocusFilter {
-    fn get_id() -> ObsString {
-        obs_string!("scroll_focus_filter")
+    fn get_id() -> &'static CStr {
+        cstr!("scroll_focus_filter")
     }
     fn get_type() -> SourceType {
         SourceType::FILTER
@@ -73,8 +72,8 @@ impl Sourceable for ScrollFocusFilter {
 }
 
 impl GetNameSource<Data> for ScrollFocusFilter {
-    fn get_name() -> ObsString {
-        obs_string!("Scroll Focus Filter")
+    fn get_name() -> &'static CStr {
+        cstr!("Scroll Focus Filter")
     }
 }
 
@@ -269,13 +268,14 @@ impl VideoRenderSource<Data> for ScrollFocusFilter {
 
 impl CreatableSource<Data> for ScrollFocusFilter {
     fn create(settings: &mut SettingsContext, mut source: SourceContext) -> Data {
+        let effect_string = CString::new(include_str!("./crop_filter.effect")).unwrap();
         if let Some(mut effect) = GraphicsEffect::from_effect_string(
-            obs_string!(include_str!("./crop_filter.effect")),
-            obs_string!("crop_filter.effect"),
+            effect_string.as_c_str(),
+            cstr!("crop_filter.effect"),
         ) {
-            if let Some(image) = effect.get_effect_param_by_name(obs_string!("image")) {
-                if let Some(add_val) = effect.get_effect_param_by_name(obs_string!("add_val")) {
-                    if let Some(mul_val) = effect.get_effect_param_by_name(obs_string!("mul_val")) {
+            if let Some(image) = effect.get_effect_param_by_name(cstr!("image")) {
+                if let Some(add_val) = effect.get_effect_param_by_name(cstr!("add_val")) {
+                    if let Some(mul_val) = effect.get_effect_param_by_name(cstr!("mul_val")) {
                         let zoom = 1.0;
                         let screen_width = 1920;
                         let screen_height = 1080;
@@ -418,14 +418,14 @@ impl Module for ScrollFocusFilter {
         true
     }
 
-    fn description() -> ObsString {
-        obs_string!("A filter that focused the currently focused Xorg window.")
+    fn description() -> &'static CStr {
+        cstr!("A filter that focused the currently focused Xorg window.")
     }
-    fn name() -> ObsString {
-        obs_string!("Scroll Focus Filter")
+    fn name() -> &'static CStr {
+        cstr!("Scroll Focus Filter")
     }
-    fn author() -> ObsString {
-        obs_string!("Bennett Hardwick")
+    fn author() -> &'static CStr {
+        cstr!("Bennett Hardwick")
     }
 }
 

@@ -1,4 +1,3 @@
-use super::ObsString;
 use std::path::PathBuf;
 use obs_sys::{
     obs_data_t, obs_properties_t, obs_property_t,

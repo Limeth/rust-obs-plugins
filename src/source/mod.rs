@@ -25,7 +25,6 @@ use super::{
     graphics::{
         GraphicsAllowDirectRendering, GraphicsColorFormat, GraphicsEffect, GraphicsEffectContext,
     },
-    string::ObsString,
 };
 
 use std::marker::PhantomData;

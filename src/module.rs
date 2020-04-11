@@ -1,7 +1,7 @@
 use crate::source::{traits::Sourceable, SourceInfo, SourceInfoBuilder};
-use crate::string::ObsString;
 use obs_sys::{obs_module_t, obs_register_source_s, obs_source_info};
 use std::marker::PhantomData;
+use std::ffi::CStr;
 
 pub struct LoadContext {
     __marker: PhantomData<()>,
@@ -51,9 +51,9 @@ pub trait Module {
     }
     fn unload(&mut self) {}
     fn post_load(&mut self) {}
-    fn description() -> ObsString;
-    fn name() -> ObsString;
-    fn author() -> ObsString;
+    fn description() -> &'static CStr;
+    fn name() -> &'static CStr;
+    fn author() -> &'static CStr;
 }
 
 #[macro_export]

@@ -32,8 +32,7 @@ use obs_sys::{
 };
 use paste::item;
 use std::ffi::{CStr, CString};
-
-use super::string::ObsString;
+use cstr::cstr;
 
 #[derive(Clone, Copy)]
 pub enum ShaderParamType {
@@ -97,7 +96,7 @@ pub struct GraphicsEffect {
 }
 
 impl GraphicsEffect {
-    pub fn from_effect_string(value: ObsString, name: ObsString) -> Option<Self> {
+    pub fn from_effect_string(value: &CStr, name: &CStr) -> Option<Self> {
         unsafe {
             obs_enter_graphics();
             let raw = gs_effect_create(value.as_ptr(), name.as_ptr(), std::ptr::null_mut());
@@ -113,7 +112,7 @@ impl GraphicsEffect {
 
     pub fn get_effect_param_by_name<T: TryFrom<GraphicsEffectParam>>(
         &mut self,
-        name: ObsString,
+        name: &CStr,
     ) -> Option<T> {
         unsafe {
             let pointer = gs_effect_get_param_by_name(self.raw, name.as_ptr());
