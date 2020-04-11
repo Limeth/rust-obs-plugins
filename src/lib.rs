@@ -112,6 +112,8 @@
 //! 2. Copy `/target/release/<module-name>.so` to your OBS plugins folder (`/usr/lib/obs-plugins/`)
 //! 3. The plugin should be available for use from inside OBS
 
+#![feature(never_type)]
+
 /// Raw bindings of OBS C API
 pub use obs_sys;
 pub use cstr::*;

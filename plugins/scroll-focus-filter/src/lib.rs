@@ -17,18 +17,18 @@ struct Data {
     source: SourceContext,
     effect: GraphicsEffect,
 
-    mul_val: GraphicsEffectVec2Param,
-    add_val: GraphicsEffectVec2Param,
-    image: GraphicsEffectTextureParam,
+    mul_val: GraphicsEffectParamTyped<ShaderParamTypeVec2>,
+    add_val: GraphicsEffectParamTyped<ShaderParamTypeVec2>,
+    image: GraphicsEffectParamTyped<ShaderParamTypeTexture>,
 
     sampler: GraphicsSamplerState,
 
     send: Sender<FilterMessage>,
     receive: Receiver<ServerMessage>,
 
-    current: Vec2,
-    from: Vec2,
-    target: Vec2,
+    current: [f32; 2],
+    from: [f32; 2],
+    target: [f32; 2],
 
     animation_time: f64,
 
@@ -167,15 +167,15 @@ impl VideoTickSource<Data> for ScrollFocusFilter {
                             || snapshot.y > (data.screen_height + data.screen_y) as f32
                         {
                             if data.target_zoom != 1.
-                                && data.target.x() != 0.
-                                && data.target.y() != 0.
+                                && data.target[0] != 0.
+                                && data.target[1] != 0.
                             {
                                 data.progress = 0.;
                                 data.from_zoom = data.current_zoom;
                                 data.target_zoom = 1.;
 
-                                data.from.set(data.current.x(), data.current.y());
-                                data.target.set(0., 0.);
+                                data.from = data.current;
+                                data.target = [0.0, 0.0];
                             }
                         } else {
                             let x = (snapshot.x + (snapshot.width / 2.) - (data.screen_x as f32))
@@ -191,8 +191,8 @@ impl VideoTickSource<Data> for ScrollFocusFilter {
                                 .min(1. - window_zoom as f32)
                                 .max(0.);
 
-                            if (target_y - data.target.y()).abs() > 0.001
-                                || (target_x - data.target.x()).abs() > 0.001
+                            if (target_y - data.target[1]).abs() > 0.001
+                                || (target_x - data.target[0]).abs() > 0.001
                                 || (window_zoom - data.target_zoom).abs() > 0.001
                             {
                                 data.progress = 0.;
@@ -200,9 +200,8 @@ impl VideoTickSource<Data> for ScrollFocusFilter {
                                 data.from_zoom = data.current_zoom;
                                 data.target_zoom = window_zoom;
 
-                                data.from.set(data.current.x(), data.current.y());
-
-                                data.target.set(target_x, target_y);
+                                data.from = data.current;
+                                data.target = [target_x, target_y];
                             }
                         }
                     }
@@ -213,10 +212,10 @@ impl VideoTickSource<Data> for ScrollFocusFilter {
 
             let adjusted_progress = smooth_step(data.progress as f32);
 
-            data.current.set(
-                data.from.x() + (data.target.x() - data.from.x()) * adjusted_progress,
-                data.from.y() + (data.target.y() - data.from.y()) * adjusted_progress,
-            );
+            data.current = [
+                data.from[0] + (data.target[0] - data.from[0]) * adjusted_progress,
+                data.from[1] + (data.target[1] - data.from[1]) * adjusted_progress,
+            ];
 
             data.current_zoom =
                 data.from_zoom + (data.target_zoom - data.from_zoom) * adjusted_progress as f64;
@@ -257,8 +256,8 @@ impl VideoRenderSource<Data> for ScrollFocusFilter {
                 GraphicsColorFormat::RGBA,
                 GraphicsAllowDirectRendering::NoDirectRendering,
                 |context, _effect| {
-                    param_add.set_vec2(context, &Vec2::new(current.x(), current.y()));
-                    param_mul.set_vec2(context, &Vec2::new(zoom, zoom));
+                    param_add.set_param_value(*current);
+                    param_mul.set_param_value([zoom, zoom]);
                     image.set_next_sampler(context, sampler);
                 },
             );
@@ -273,83 +272,89 @@ impl CreatableSource<Data> for ScrollFocusFilter {
             effect_string.as_c_str(),
             cstr!("crop_filter.effect"),
         ) {
-            if let Some(image) = effect.get_effect_param_by_name(cstr!("image")) {
-                if let Some(add_val) = effect.get_effect_param_by_name(cstr!("add_val")) {
-                    if let Some(mul_val) = effect.get_effect_param_by_name(cstr!("mul_val")) {
-                        let zoom = 1.0;
-                        let screen_width = 1920;
-                        let screen_height = 1080;
-                        let screen_x = 0;
-                        let screen_y = 0;
-                        let animation_time = 0.3;
+            let param_image = effect.get_effect_param_by_name(cstr!("image"));
+            let param_add_val = effect.get_effect_param_by_name(cstr!("add_val"));
+            let param_mul_val = effect.get_effect_param_by_name(cstr!("mul_val"));
 
-                        let sampler = GraphicsSamplerState::from(GraphicsSamplerInfo::default());
+            if param_image.is_none() || param_add_val.is_none() || param_mul_val.is_none() {
+                panic!("Failed to find correct effect params!");
+            }
 
-                        let (send_filter, receive_filter) = unbounded::<FilterMessage>();
-                        let (send_server, receive_server) = unbounded::<ServerMessage>();
+            let param_image = param_image.unwrap().downcast::<ShaderParamTypeTexture>().unwrap();
+            let param_add_val = param_add_val.unwrap().downcast::<ShaderParamTypeVec2>().unwrap();
+            let param_mul_val = param_mul_val.unwrap().downcast::<ShaderParamTypeVec2>().unwrap();
 
-                        std::thread::spawn(move || {
-                            let mut server = Server::new().unwrap();
+            let zoom = 1.0;
+            let screen_width = 1920;
+            let screen_height = 1080;
+            let screen_x = 0;
+            let screen_y = 0;
+            let animation_time = 0.3;
 
-                            loop {
-                                if let Some(snapshot) = server.wait_for_event() {
-                                    send_server
-                                        .send(ServerMessage::Snapshot(snapshot))
-                                        .unwrap_or(());
-                                }
+            let sampler = GraphicsSamplerState::from(GraphicsSamplerInfo::default());
 
-                                if let Ok(msg) = receive_filter.try_recv() {
-                                    match msg {
-                                        FilterMessage::CloseConnection => {
-                                            return;
-                                        }
-                                    }
-                                }
+            let (send_filter, receive_filter) = unbounded::<FilterMessage>();
+            let (send_server, receive_server) = unbounded::<ServerMessage>();
+
+            std::thread::spawn(move || {
+                let mut server = Server::new().unwrap();
+
+                loop {
+                    if let Some(snapshot) = server.wait_for_event() {
+                        send_server
+                            .send(ServerMessage::Snapshot(snapshot))
+                            .unwrap_or(());
+                    }
+
+                    if let Ok(msg) = receive_filter.try_recv() {
+                        match msg {
+                            FilterMessage::CloseConnection => {
+                                return;
                             }
-                        });
-
-                        source.update_source_settings(settings);
-
-                        return Data {
-                            source,
-                            effect,
-                            add_val,
-                            mul_val,
-                            image,
-
-                            sampler,
-
-                            animation_time,
-
-                            current_zoom: zoom,
-                            from_zoom: zoom,
-                            target_zoom: zoom,
-                            internal_zoom: zoom,
-
-                            send: send_filter,
-                            receive: receive_server,
-
-                            current: Vec2::new(0., 0.),
-                            from: Vec2::new(0., 0.),
-                            target: Vec2::new(0., 0.),
-
-                            progress: 1.,
-
-                            screen_height,
-                            screen_width,
-                            screen_x,
-                            screen_y,
-
-                            property_zoom: None,
-                            property_screen_x: None,
-                            property_screen_y: None,
-                            property_screen_width: None,
-                            property_screen_height: None,
-                            property_animation_time: None,
-                        };
+                        }
                     }
                 }
-            }
+            });
+
+            source.update_source_settings(settings);
+
+            return Data {
+                source,
+                effect,
+                add_val: param_add_val,
+                mul_val: param_mul_val,
+                image: param_image,
+
+                sampler,
+
+                animation_time,
+
+                current_zoom: zoom,
+                from_zoom: zoom,
+                target_zoom: zoom,
+                internal_zoom: zoom,
+
+                send: send_filter,
+                receive: receive_server,
+
+                current: [0.0, 0.0],
+                from: [0.0, 0.0],
+                target: [0.0, 0.0],
+
+                progress: 1.,
+
+                screen_height,
+                screen_width,
+                screen_x,
+                screen_y,
+
+                property_zoom: None,
+                property_screen_x: None,
+                property_screen_y: None,
+                property_screen_width: None,
+                property_screen_height: None,
+                property_animation_time: None,
+            };
 
             panic!("Failed to find correct effect params!");
         } else {

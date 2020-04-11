@@ -1,5 +1,9 @@
+use std::mem;
+use std::ffi::{CStr, CString};
+use std::os::raw::c_void;
 use core::convert::TryFrom;
 use obs_sys::{
+    size_t,
     gs_address_mode, gs_address_mode_GS_ADDRESS_BORDER, gs_address_mode_GS_ADDRESS_CLAMP,
     gs_address_mode_GS_ADDRESS_MIRROR, gs_address_mode_GS_ADDRESS_MIRRORONCE,
     gs_address_mode_GS_ADDRESS_WRAP, gs_color_format, gs_color_format_GS_A8,
@@ -10,7 +14,7 @@ use obs_sys::{
     gs_color_format_GS_RG32F, gs_color_format_GS_RGBA, gs_color_format_GS_RGBA16,
     gs_color_format_GS_RGBA16F, gs_color_format_GS_RGBA32F, gs_color_format_GS_UNKNOWN,
     gs_effect_create, gs_effect_destroy, gs_effect_get_param_by_name, gs_effect_get_param_info,
-    gs_effect_param_info, gs_effect_set_next_sampler, gs_effect_set_vec2, gs_effect_t, gs_eparam_t,
+    gs_effect_param_info, gs_effect_set_next_sampler, gs_effect_t, gs_eparam_t,
     gs_sample_filter, gs_sample_filter_GS_FILTER_ANISOTROPIC, gs_sample_filter_GS_FILTER_LINEAR,
     gs_sample_filter_GS_FILTER_MIN_LINEAR_MAG_MIP_POINT,
     gs_sample_filter_GS_FILTER_MIN_LINEAR_MAG_POINT_MIP_LINEAR,
@@ -29,13 +33,198 @@ use obs_sys::{
     obs_allow_direct_render, obs_allow_direct_render_OBS_ALLOW_DIRECT_RENDERING,
     obs_allow_direct_render_OBS_NO_DIRECT_RENDERING, obs_enter_graphics, obs_leave_graphics, vec2,
     vec3, vec4,
+    gs_effect_set_bool,
+    gs_effect_set_float,
+    gs_effect_set_int,
+    gs_effect_set_vec2,
+    gs_effect_set_vec3,
+    gs_effect_set_vec4,
+    gs_effect_set_val,
+    gs_effect_set_texture,
+    gs_effect_set_matrix4,
 };
 use paste::item;
-use std::ffi::{CStr, CString};
 use cstr::cstr;
 
-#[derive(Clone, Copy)]
-pub enum ShaderParamType {
+pub mod shader_param_types {
+    use super::*;
+
+    pub trait ShaderParamType {
+        type RustType;
+
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType);
+        fn corresponding_enum_variant() -> ShaderParamTypeKind;
+    }
+
+    pub struct ShaderParamTypeBool;
+    impl ShaderParamType for ShaderParamTypeBool {
+        type RustType = bool;
+
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+            gs_effect_set_bool(param, value);
+        }
+
+        fn corresponding_enum_variant() -> ShaderParamTypeKind {
+            ShaderParamTypeKind::Bool
+        }
+    }
+
+    pub struct ShaderParamTypeFloat;
+    impl ShaderParamType for ShaderParamTypeFloat {
+        type RustType = f32;
+
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+            gs_effect_set_float(param, value);
+        }
+
+        fn corresponding_enum_variant() -> ShaderParamTypeKind {
+            ShaderParamTypeKind::Float
+        }
+    }
+
+    pub struct ShaderParamTypeInt;
+    impl ShaderParamType for ShaderParamTypeInt {
+        type RustType = i32;
+
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+            gs_effect_set_int(param, value);
+        }
+
+        fn corresponding_enum_variant() -> ShaderParamTypeKind {
+            ShaderParamTypeKind::Int
+        }
+    }
+
+    pub struct ShaderParamTypeVec2;
+    impl ShaderParamType for ShaderParamTypeVec2 {
+        type RustType = [f32; 2];
+
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+            let mut value = Vec2::new(value[0], value[1]);
+            gs_effect_set_vec2(param, value.as_ptr());
+        }
+
+        fn corresponding_enum_variant() -> ShaderParamTypeKind {
+            ShaderParamTypeKind::Vec2
+        }
+    }
+
+    pub struct ShaderParamTypeVec3;
+    impl ShaderParamType for ShaderParamTypeVec3 {
+        type RustType = [f32; 3];
+
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+            let mut value = Vec3::new(value[0], value[1], value[2]);
+            gs_effect_set_vec3(param, value.as_ptr());
+        }
+
+        fn corresponding_enum_variant() -> ShaderParamTypeKind {
+            ShaderParamTypeKind::Vec3
+        }
+    }
+
+    pub struct ShaderParamTypeVec4;
+    impl ShaderParamType for ShaderParamTypeVec4 {
+        type RustType = [f32; 4];
+
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+            let mut value = Vec4::new(value[0], value[1], value[2], value[3]);
+            gs_effect_set_vec4(param, value.as_ptr());
+        }
+
+        fn corresponding_enum_variant() -> ShaderParamTypeKind {
+            ShaderParamTypeKind::Vec4
+        }
+    }
+
+    pub struct ShaderParamTypeIVec2;
+    impl ShaderParamType for ShaderParamTypeIVec2 {
+        type RustType = [i32; 2];
+
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+            gs_effect_set_val(
+                param,
+                (&value) as *const _ as *const c_void,
+                mem::size_of::<Self::RustType>() as size_t,
+            );
+        }
+
+        fn corresponding_enum_variant() -> ShaderParamTypeKind {
+            ShaderParamTypeKind::IVec2
+        }
+    }
+
+    pub struct ShaderParamTypeIVec3;
+    impl ShaderParamType for ShaderParamTypeIVec3 {
+        type RustType = [i32; 3];
+
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+            gs_effect_set_val(
+                param,
+                (&value) as *const _ as *const c_void,
+                mem::size_of::<Self::RustType>() as size_t,
+            );
+        }
+
+        fn corresponding_enum_variant() -> ShaderParamTypeKind {
+            ShaderParamTypeKind::IVec3
+        }
+    }
+
+    pub struct ShaderParamTypeIVec4;
+    impl ShaderParamType for ShaderParamTypeIVec4 {
+        type RustType = [i32; 4];
+
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+            gs_effect_set_val(
+                param,
+                (&value) as *const _ as *const c_void,
+                mem::size_of::<Self::RustType>() as size_t,
+            );
+        }
+
+        fn corresponding_enum_variant() -> ShaderParamTypeKind {
+            ShaderParamTypeKind::IVec4
+        }
+    }
+
+    pub struct ShaderParamTypeMat4;
+    impl ShaderParamType for ShaderParamTypeMat4 {
+        type RustType = [[f32; 4]; 4];
+
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+            gs_effect_set_val(
+                param,
+                (&value) as *const _ as *const c_void,
+                mem::size_of::<Self::RustType>() as size_t,
+            );
+        }
+
+        fn corresponding_enum_variant() -> ShaderParamTypeKind {
+            ShaderParamTypeKind::Mat4
+        }
+    }
+
+    pub struct ShaderParamTypeTexture;
+    impl ShaderParamType for ShaderParamTypeTexture {
+        // TODO
+        type RustType = !;
+
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+            // TODO
+            unimplemented!();
+        }
+
+        fn corresponding_enum_variant() -> ShaderParamTypeKind {
+            ShaderParamTypeKind::Texture
+        }
+    }
+}
+
+pub use shader_param_types::*;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ShaderParamTypeKind {
     Unknown,
     Bool,
     Float,
@@ -44,48 +233,48 @@ pub enum ShaderParamType {
     Vec2,
     Vec3,
     Vec4,
-    Int2,
-    Int3,
-    Int4,
+    IVec2,
+    IVec3,
+    IVec4,
     Mat4,
     Texture,
 }
 
-impl ShaderParamType {
+impl ShaderParamTypeKind {
     pub fn as_raw(&self) -> gs_shader_param_type {
         match self {
-            ShaderParamType::Unknown => gs_shader_param_type_GS_SHADER_PARAM_UNKNOWN,
-            ShaderParamType::Bool => gs_shader_param_type_GS_SHADER_PARAM_BOOL,
-            ShaderParamType::Float => gs_shader_param_type_GS_SHADER_PARAM_FLOAT,
-            ShaderParamType::Int => gs_shader_param_type_GS_SHADER_PARAM_INT,
-            ShaderParamType::String => gs_shader_param_type_GS_SHADER_PARAM_STRING,
-            ShaderParamType::Vec2 => gs_shader_param_type_GS_SHADER_PARAM_VEC2,
-            ShaderParamType::Vec3 => gs_shader_param_type_GS_SHADER_PARAM_VEC3,
-            ShaderParamType::Vec4 => gs_shader_param_type_GS_SHADER_PARAM_VEC4,
-            ShaderParamType::Int2 => gs_shader_param_type_GS_SHADER_PARAM_INT2,
-            ShaderParamType::Int3 => gs_shader_param_type_GS_SHADER_PARAM_INT3,
-            ShaderParamType::Int4 => gs_shader_param_type_GS_SHADER_PARAM_INT4,
-            ShaderParamType::Mat4 => gs_shader_param_type_GS_SHADER_PARAM_MATRIX4X4,
-            ShaderParamType::Texture => gs_shader_param_type_GS_SHADER_PARAM_TEXTURE,
+            ShaderParamTypeKind::Unknown => gs_shader_param_type_GS_SHADER_PARAM_UNKNOWN,
+            ShaderParamTypeKind::Bool => gs_shader_param_type_GS_SHADER_PARAM_BOOL,
+            ShaderParamTypeKind::Float => gs_shader_param_type_GS_SHADER_PARAM_FLOAT,
+            ShaderParamTypeKind::Int => gs_shader_param_type_GS_SHADER_PARAM_INT,
+            ShaderParamTypeKind::String => gs_shader_param_type_GS_SHADER_PARAM_STRING,
+            ShaderParamTypeKind::Vec2 => gs_shader_param_type_GS_SHADER_PARAM_VEC2,
+            ShaderParamTypeKind::Vec3 => gs_shader_param_type_GS_SHADER_PARAM_VEC3,
+            ShaderParamTypeKind::Vec4 => gs_shader_param_type_GS_SHADER_PARAM_VEC4,
+            ShaderParamTypeKind::IVec2 => gs_shader_param_type_GS_SHADER_PARAM_INT2,
+            ShaderParamTypeKind::IVec3 => gs_shader_param_type_GS_SHADER_PARAM_INT3,
+            ShaderParamTypeKind::IVec4 => gs_shader_param_type_GS_SHADER_PARAM_INT4,
+            ShaderParamTypeKind::Mat4 => gs_shader_param_type_GS_SHADER_PARAM_MATRIX4X4,
+            ShaderParamTypeKind::Texture => gs_shader_param_type_GS_SHADER_PARAM_TEXTURE,
         }
     }
 
     #[allow(non_upper_case_globals)]
     pub fn from_raw(param_type: gs_shader_param_type) -> Self {
         match param_type {
-            gs_shader_param_type_GS_SHADER_PARAM_UNKNOWN => ShaderParamType::Unknown,
-            gs_shader_param_type_GS_SHADER_PARAM_BOOL => ShaderParamType::Bool,
-            gs_shader_param_type_GS_SHADER_PARAM_FLOAT => ShaderParamType::Float,
-            gs_shader_param_type_GS_SHADER_PARAM_INT => ShaderParamType::Int,
-            gs_shader_param_type_GS_SHADER_PARAM_STRING => ShaderParamType::String,
-            gs_shader_param_type_GS_SHADER_PARAM_VEC2 => ShaderParamType::Vec2,
-            gs_shader_param_type_GS_SHADER_PARAM_VEC3 => ShaderParamType::Vec3,
-            gs_shader_param_type_GS_SHADER_PARAM_VEC4 => ShaderParamType::Vec4,
-            gs_shader_param_type_GS_SHADER_PARAM_INT2 => ShaderParamType::Int2,
-            gs_shader_param_type_GS_SHADER_PARAM_INT3 => ShaderParamType::Int3,
-            gs_shader_param_type_GS_SHADER_PARAM_INT4 => ShaderParamType::Int4,
-            gs_shader_param_type_GS_SHADER_PARAM_MATRIX4X4 => ShaderParamType::Mat4,
-            gs_shader_param_type_GS_SHADER_PARAM_TEXTURE => ShaderParamType::Texture,
+            gs_shader_param_type_GS_SHADER_PARAM_UNKNOWN => ShaderParamTypeKind::Unknown,
+            gs_shader_param_type_GS_SHADER_PARAM_BOOL => ShaderParamTypeKind::Bool,
+            gs_shader_param_type_GS_SHADER_PARAM_FLOAT => ShaderParamTypeKind::Float,
+            gs_shader_param_type_GS_SHADER_PARAM_INT => ShaderParamTypeKind::Int,
+            gs_shader_param_type_GS_SHADER_PARAM_STRING => ShaderParamTypeKind::String,
+            gs_shader_param_type_GS_SHADER_PARAM_VEC2 => ShaderParamTypeKind::Vec2,
+            gs_shader_param_type_GS_SHADER_PARAM_VEC3 => ShaderParamTypeKind::Vec3,
+            gs_shader_param_type_GS_SHADER_PARAM_VEC4 => ShaderParamTypeKind::Vec4,
+            gs_shader_param_type_GS_SHADER_PARAM_INT2 => ShaderParamTypeKind::IVec2,
+            gs_shader_param_type_GS_SHADER_PARAM_INT3 => ShaderParamTypeKind::IVec3,
+            gs_shader_param_type_GS_SHADER_PARAM_INT4 => ShaderParamTypeKind::IVec4,
+            gs_shader_param_type_GS_SHADER_PARAM_MATRIX4X4 => ShaderParamTypeKind::Mat4,
+            gs_shader_param_type_GS_SHADER_PARAM_TEXTURE => ShaderParamTypeKind::Texture,
             _ => panic!("Invalid param_type!"),
         }
     }
@@ -110,14 +299,14 @@ impl GraphicsEffect {
         }
     }
 
-    pub fn get_effect_param_by_name<T: TryFrom<GraphicsEffectParam>>(
+    pub fn get_effect_param_by_name(
         &mut self,
         name: &CStr,
-    ) -> Option<T> {
+    ) -> Option<GraphicsEffectParam> {
         unsafe {
             let pointer = gs_effect_get_param_by_name(self.raw, name.as_ptr());
             if !pointer.is_null() {
-                T::try_from(GraphicsEffectParam::from_raw(pointer)).ok()
+                Some(GraphicsEffectParam::from_raw(pointer))
             } else {
                 None
             }
@@ -148,7 +337,7 @@ pub enum GraphicsEffectParamConversionError {
 pub struct GraphicsEffectParam {
     raw: *mut gs_eparam_t,
     name: String,
-    shader_type: ShaderParamType,
+    shader_type: ShaderParamTypeKind,
 }
 
 impl GraphicsEffectParam {
@@ -159,7 +348,7 @@ impl GraphicsEffectParam {
         let mut info = gs_effect_param_info::default();
         gs_effect_get_param_info(raw, &mut info);
 
-        let shader_type = ShaderParamType::from_raw(info.type_);
+        let shader_type = ShaderParamTypeKind::from_raw(info.type_);
         let name = CString::from(CStr::from_ptr(info.name))
             .into_string()
             .unwrap_or(String::from("{unknown-param-name}"));
@@ -171,55 +360,47 @@ impl GraphicsEffectParam {
         }
     }
 
-    pub fn get_name(&self) -> &str {
+    pub fn name(&self) -> &str {
         &self.name
     }
-}
 
-macro_rules! impl_graphics_effects {
-    ($($t:ident)*) => {
-        $(
-            item! {
-                pub struct [<GraphicsEffect $t Param>] {
-                    effect: GraphicsEffectParam,
-                }
+    pub fn param_type(&self) -> ShaderParamTypeKind {
+        self.shader_type
+    }
 
-                impl TryFrom<GraphicsEffectParam> for [<GraphicsEffect $t Param>] {
-                    type Error = GraphicsEffectParamConversionError;
-
-                    fn try_from(effect: GraphicsEffectParam) -> Result<Self, Self::Error> {
-                        match effect.shader_type {
-                            ShaderParamType::[<$t>] => Ok([<GraphicsEffect $t Param>] { effect }),
-                            _ => Err(GraphicsEffectParamConversionError::InvalidType),
-                        }
-                    }
-                }
-            }
-        )*
-    };
-}
-
-impl_graphics_effects! {
-    Vec2
-    Texture
-}
-
-impl GraphicsEffectVec2Param {
-    pub fn set_vec2(&mut self, _context: &GraphicsEffectContext, value: &Vec2) {
-        unsafe {
-            gs_effect_set_vec2(self.effect.raw, &value.raw);
+    pub fn downcast<T: ShaderParamType>(self) -> Option<GraphicsEffectParamTyped<T>> {
+        if self.shader_type == <T as ShaderParamType>::corresponding_enum_variant() {
+            Some(GraphicsEffectParamTyped {
+                inner: self,
+                __marker: Default::default(),
+            })
+        } else {
+            None
         }
     }
 }
 
-impl GraphicsEffectTextureParam {
+pub struct GraphicsEffectParamTyped<T: ShaderParamType> {
+    pub inner: GraphicsEffectParam,
+    __marker: std::marker::PhantomData<T>,
+}
+
+impl<T: ShaderParamType> GraphicsEffectParamTyped<T> {
+    pub fn set_param_value(&mut self, value: <T as ShaderParamType>::RustType) {
+        unsafe {
+            <T as ShaderParamType>::set_param_value(self.inner.raw, value);
+        }
+    }
+}
+
+impl GraphicsEffectParamTyped<ShaderParamTypeTexture> {
     pub fn set_next_sampler(
         &mut self,
         _context: &GraphicsEffectContext,
         value: &mut GraphicsSamplerState,
     ) {
         unsafe {
-            gs_effect_set_next_sampler(self.effect.raw, value.raw);
+            gs_effect_set_next_sampler(self.inner.raw, value.raw);
         }
     }
 }
@@ -438,12 +619,12 @@ macro_rules! vector_impls {
     ($($rust_name: ident, $name:ident => $($component:ident)*,)*) => (
         $(
         #[derive(Clone)]
-        pub struct $rust_name {
+        struct $rust_name {
             raw: $name,
         }
 
         impl $rust_name {
-            pub fn new($( $component: f32, )*) -> Self {
+            fn new($( $component: f32, )*) -> Self {
                 let mut v = Self {
                     raw: $name::default(),
                 };
@@ -452,127 +633,16 @@ macro_rules! vector_impls {
             }
 
             #[inline]
-            pub fn zero(&mut self) {
-                $(
-                    self.raw.__bindgen_anon_1.__bindgen_anon_1.$component = 0.;
-                )*
-            }
-
-            #[inline]
-            pub fn copy(&mut self, input: &$rust_name) {
-                self.set($(input.$component(),)*);
-            }
-
-            #[inline]
-            pub fn add(&mut self, input: &$rust_name) {
-                self.set($(self.$component() + input.$component(),)*);
-            }
-
-            #[inline]
-            pub fn sub(&mut self, input: &$rust_name) {
-                self.set($(self.$component() - input.$component(),)*);
-            }
-
-            #[inline]
-            pub fn mul(&mut self, input: &$rust_name) {
-                self.set($(self.$component() * input.$component(),)*);
-            }
-
-            #[inline]
-            pub fn div(&mut self, input: &$rust_name) {
-                self.set($(self.$component() / input.$component(),)*);
-            }
-
-            #[inline]
-            pub fn addf(&mut self, input: f32) {
-                self.set($(self.$component() + input,)*);
-            }
-
-            #[inline]
-            pub fn subf(&mut self, input: f32) {
-                self.set($(self.$component() - input,)*);
-            }
-
-            #[inline]
-            pub fn mulf(&mut self, input: f32) {
-                self.set($(self.$component() * input,)*);
-            }
-
-            #[inline]
-            pub fn divf(&mut self, input: f32) {
-                self.set($(self.$component() / input,)*);
-            }
-
-            #[inline]
-            pub fn neg(&mut self) {
-                self.set($(-self.$component(),)*);
-            }
-
-            #[inline]
-            pub fn dot(&mut self, input: &$rust_name) -> f32 {
-                $(
-                    self.$component() * input.$component() +
-                )* 0.
-            }
-
-            #[inline]
-            pub fn len(&mut self) -> f32 {
-                ($( self.$component() * self.$component() + )* 0.).sqrt()
-            }
-
-            #[inline]
-            pub fn set(&mut self, $( $component: f32, )*) {
+            fn set(&mut self, $( $component: f32, )*) {
                 $(
                     self.raw.__bindgen_anon_1.__bindgen_anon_1.$component = $component;
                 )*
             }
 
-            #[inline]
-            pub fn min(&mut self, input: &$rust_name) {
-                self.set($(self.$component().min(input.$component()),)*);
-            }
-
-            #[inline]
-            pub fn max(&mut self, input: &$rust_name) {
-                self.set($(self.$component().max(input.$component()),)*);
-            }
-
-            #[inline]
-            pub fn minf(&mut self, input: f32) {
-                self.set($(self.$component().min(input),)*);
-            }
-
-            #[inline]
-            pub fn maxf(&mut self, input: f32) {
-                self.set($(self.$component().max(input),)*);
-            }
-
-            #[inline]
-            pub fn abs(&mut self) {
-                self.set($(self.$component().abs(),)*);
-            }
-
-            #[inline]
-            pub fn ceil(&mut self) {
-                self.set($(self.$component().ceil(),)*);
-            }
-
-            #[inline]
-            pub fn floor(&mut self) {
-                self.set($(self.$component().floor(),)*);
-            }
-
-            #[inline]
-            pub fn close(&mut self, input: &$rust_name, epsilon: f32) -> bool {
-                $(
-                    (self.$component() - input.$component()).abs() > epsilon &&
-                )* true
-            }
-
             $(
                 item! {
                     #[inline]
-                    pub fn [<$component>](&self) -> f32 {
+                    fn [<$component>](&self) -> f32 {
                         unsafe {
                             self.raw.__bindgen_anon_1.__bindgen_anon_1.$component
                         }
