@@ -246,13 +246,6 @@ impl CreatableSource<Data> for ScrollFocusFilter {
         let param_add_val = param_add_val.unwrap().downcast::<ShaderParamTypeVec2>().unwrap();
         let param_mul_val = param_mul_val.unwrap().downcast::<ShaderParamTypeVec2>().unwrap();
 
-        let zoom = 1.0;
-        let screen_width = 1920;
-        let screen_height = 1080;
-        let screen_x = 0;
-        let screen_y = 0;
-        let animation_time = 0.3;
-
         let sampler = GraphicsSamplerState::from(GraphicsSamplerInfo::default());
 
         let (send_filter, receive_filter) = unbounded::<FilterMessage>();
@@ -289,12 +282,12 @@ impl CreatableSource<Data> for ScrollFocusFilter {
 
             sampler,
 
-            animation_time,
+            animation_time: DEFAULT_ANIMATION_TIME,
 
-            current_zoom: zoom,
-            from_zoom: zoom,
-            target_zoom: zoom,
-            internal_zoom: zoom,
+            current_zoom: DEFAULT_ZOOM,
+            from_zoom: DEFAULT_ZOOM,
+            target_zoom: DEFAULT_ZOOM,
+            internal_zoom: DEFAULT_ZOOM,
 
             send: send_filter,
             receive: receive_server,
@@ -305,10 +298,10 @@ impl CreatableSource<Data> for ScrollFocusFilter {
 
             progress: 1.,
 
-            screen_height,
-            screen_width,
-            screen_x,
-            screen_y,
+            screen_width: DEFAULT_SCREEN_WIDTH as u32,
+            screen_height: DEFAULT_SCREEN_HEIGHT as u32,
+            screen_x: DEFAULT_SCREEN_X as u32,
+            screen_y: DEFAULT_SCREEN_Y as u32,
 
             property_zoom: PropertyDescriptor {
                 name: CString::new("zoom").unwrap(),
