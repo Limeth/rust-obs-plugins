@@ -1,5 +1,5 @@
 use super::context::{ActiveContext, VideoRenderContext};
-use super::properties::{Properties, Property, SettingsContext};
+use super::properties::{Properties, SettingsContext};
 use super::traits::*;
 use super::{EnumActiveContext, EnumAllContext, SourceContext};
 use std::ffi::c_void;
@@ -115,11 +115,13 @@ pub unsafe extern "C" fn get_properties<D, F: GetPropertiesSource<D>>(
 ) -> *mut obs_properties {
     let wrapper: &mut DataWrapper<D> = &mut *(data as *mut DataWrapper<D>);
 
-    let mut properties = Properties::from_raw(obs_properties_create());
+    let properties = F::get_properties(&wrapper.data);
+    let properties_ptr = properties.as_raw();
 
-    F::get_properties(&mut wrapper.data, &mut properties);
+    // Ensure not to free the `properties_ptr` before returning it
+    std::mem::forget(properties);
 
-    properties.into_raw()
+    properties_ptr
 }
 
 pub unsafe extern "C" fn enum_active_sources<D, F: EnumActiveSource<D>>(

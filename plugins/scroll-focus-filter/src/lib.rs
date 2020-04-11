@@ -13,6 +13,13 @@ enum ServerMessage {
     Snapshot(WindowSnapshot),
 }
 
+const DEFAULT_ZOOM: f64 = 1.0;
+const DEFAULT_SCREEN_X: i32 = 0;
+const DEFAULT_SCREEN_Y: i32 = 0;
+const DEFAULT_SCREEN_WIDTH: i32 = 1920;
+const DEFAULT_SCREEN_HEIGHT: i32 = 1080;
+const DEFAULT_ANIMATION_TIME: f64 = 0.3;
+
 struct Data {
     source: SourceContext,
     effect: GraphicsEffect,
@@ -44,12 +51,12 @@ struct Data {
     screen_x: u32,
     screen_y: u32,
 
-    property_zoom: Option<Property<PropertyDescriptorF64>>,
-    property_screen_x: Option<Property<PropertyDescriptorI32>>,
-    property_screen_y: Option<Property<PropertyDescriptorI32>>,
-    property_screen_width: Option<Property<PropertyDescriptorI32>>,
-    property_screen_height: Option<Property<PropertyDescriptorI32>>,
-    property_animation_time: Option<Property<PropertyDescriptorF64>>,
+    property_zoom: PropertyDescriptor<PropertyDescriptorSpecializationF64>,
+    property_screen_x: PropertyDescriptor<PropertyDescriptorSpecializationI32>,
+    property_screen_y: PropertyDescriptor<PropertyDescriptorSpecializationI32>,
+    property_screen_width: PropertyDescriptor<PropertyDescriptorSpecializationI32>,
+    property_screen_height: PropertyDescriptor<PropertyDescriptorSpecializationI32>,
+    property_animation_time: PropertyDescriptor<PropertyDescriptorSpecializationF64>,
 }
 
 impl Drop for Data {
@@ -78,68 +85,18 @@ impl GetNameSource<Data> for ScrollFocusFilter {
 }
 
 impl GetPropertiesSource<Data> for ScrollFocusFilter {
-    fn get_properties(_data: &mut Option<Data>, properties: &mut Properties) {
-        let data = _data.as_mut().unwrap();
-        data.property_zoom = Some(properties.add_property(
-            "zoom".to_string(),
-            "Amount to zoom in window".to_string(),
-            PropertyDescriptorF64 {
-                min: 1.0,
-                max: 5.0,
-                step: 0.001,
-                slider: true,
-            },
-        ));
-        data.property_screen_x = Some(properties.add_property(
-            "screen_x".to_string(),
-            "Offset relative to top left screen - x".to_string(),
-            PropertyDescriptorI32 {
-                min: 0,
-                max: 3840 * 3,
-                step: 1,
-                slider: false,
-            },
-        ));
-        data.property_screen_y = Some(properties.add_property(
-            "screen_y".to_string(),
-            "Offset relative to top left screen - y".to_string(),
-            PropertyDescriptorI32 {
-                min: 0,
-                max: 3840 * 3,
-                step: 1,
-                slider: false,
-            },
-        ));
-        data.property_screen_width = Some(properties.add_property(
-            "screen_width".to_string(),
-            "Screen width".to_string(),
-            PropertyDescriptorI32 {
-                min: 1,
-                max: 3840 * 3,
-                step: 1,
-                slider: false,
-            },
-        ));
-        data.property_screen_height = Some(properties.add_property(
-            "screen_height".to_string(),
-            "Screen height".to_string(),
-            PropertyDescriptorI32 {
-                min: 1,
-                max: 3840 * 3,
-                step: 1,
-                slider: false,
-            },
-        ));
-        data.property_animation_time = Some(properties.add_property(
-            "animation_time".to_string(),
-            "Animation Time (s)".to_string(),
-            PropertyDescriptorF64 {
-                min: 0.3,
-                max: 10.,
-                step: 0.001,
-                slider: false,
-            },
-        ));
+    fn get_properties(data: &Option<Data>) -> Properties {
+        let data = data.as_ref().unwrap();
+        let mut properties = Properties::new();
+
+        properties.add_property(&data.property_zoom);
+        properties.add_property(&data.property_screen_x);
+        properties.add_property(&data.property_screen_y);
+        properties.add_property(&data.property_screen_width);
+        properties.add_property(&data.property_screen_height);
+        properties.add_property(&data.property_animation_time);
+
+        properties
     }
 }
 
@@ -268,97 +225,151 @@ impl VideoRenderSource<Data> for ScrollFocusFilter {
 impl CreatableSource<Data> for ScrollFocusFilter {
     fn create(settings: &mut SettingsContext, mut source: SourceContext) -> Data {
         let effect_string = CString::new(include_str!("./crop_filter.effect")).unwrap();
-        if let Some(mut effect) = GraphicsEffect::from_effect_string(
+        let mut effect = if let Some(effect) = GraphicsEffect::from_effect_string(
             effect_string.as_c_str(),
             cstr!("crop_filter.effect"),
         ) {
-            let param_image = effect.get_effect_param_by_name(cstr!("image"));
-            let param_add_val = effect.get_effect_param_by_name(cstr!("add_val"));
-            let param_mul_val = effect.get_effect_param_by_name(cstr!("mul_val"));
+            effect
+        } else {
+            panic!("Could not load crop filter effect!");
+        };
 
-            if param_image.is_none() || param_add_val.is_none() || param_mul_val.is_none() {
-                panic!("Failed to find correct effect params!");
-            }
+        let param_image = effect.get_effect_param_by_name(cstr!("image"));
+        let param_add_val = effect.get_effect_param_by_name(cstr!("add_val"));
+        let param_mul_val = effect.get_effect_param_by_name(cstr!("mul_val"));
 
-            let param_image = param_image.unwrap().downcast::<ShaderParamTypeTexture>().unwrap();
-            let param_add_val = param_add_val.unwrap().downcast::<ShaderParamTypeVec2>().unwrap();
-            let param_mul_val = param_mul_val.unwrap().downcast::<ShaderParamTypeVec2>().unwrap();
+        if param_image.is_none() || param_add_val.is_none() || param_mul_val.is_none() {
+            panic!("Failed to find correct effect params!");
+        }
 
-            let zoom = 1.0;
-            let screen_width = 1920;
-            let screen_height = 1080;
-            let screen_x = 0;
-            let screen_y = 0;
-            let animation_time = 0.3;
+        let param_image = param_image.unwrap().downcast::<ShaderParamTypeTexture>().unwrap();
+        let param_add_val = param_add_val.unwrap().downcast::<ShaderParamTypeVec2>().unwrap();
+        let param_mul_val = param_mul_val.unwrap().downcast::<ShaderParamTypeVec2>().unwrap();
 
-            let sampler = GraphicsSamplerState::from(GraphicsSamplerInfo::default());
+        let zoom = 1.0;
+        let screen_width = 1920;
+        let screen_height = 1080;
+        let screen_x = 0;
+        let screen_y = 0;
+        let animation_time = 0.3;
 
-            let (send_filter, receive_filter) = unbounded::<FilterMessage>();
-            let (send_server, receive_server) = unbounded::<ServerMessage>();
+        let sampler = GraphicsSamplerState::from(GraphicsSamplerInfo::default());
 
-            std::thread::spawn(move || {
-                let mut server = Server::new().unwrap();
+        let (send_filter, receive_filter) = unbounded::<FilterMessage>();
+        let (send_server, receive_server) = unbounded::<ServerMessage>();
 
-                loop {
-                    if let Some(snapshot) = server.wait_for_event() {
-                        send_server
-                            .send(ServerMessage::Snapshot(snapshot))
-                            .unwrap_or(());
-                    }
+        std::thread::spawn(move || {
+            let mut server = Server::new().unwrap();
 
-                    if let Ok(msg) = receive_filter.try_recv() {
-                        match msg {
-                            FilterMessage::CloseConnection => {
-                                return;
-                            }
+            loop {
+                if let Some(snapshot) = server.wait_for_event() {
+                    send_server
+                        .send(ServerMessage::Snapshot(snapshot))
+                        .unwrap_or(());
+                }
+
+                if let Ok(msg) = receive_filter.try_recv() {
+                    match msg {
+                        FilterMessage::CloseConnection => {
+                            return;
                         }
                     }
                 }
-            });
+            }
+        });
 
-            source.update_source_settings(settings);
+        source.update_source_settings(settings);
 
-            return Data {
-                source,
-                effect,
-                add_val: param_add_val,
-                mul_val: param_mul_val,
-                image: param_image,
+        Data {
+            source,
+            effect,
+            add_val: param_add_val,
+            mul_val: param_mul_val,
+            image: param_image,
 
-                sampler,
+            sampler,
 
-                animation_time,
+            animation_time,
 
-                current_zoom: zoom,
-                from_zoom: zoom,
-                target_zoom: zoom,
-                internal_zoom: zoom,
+            current_zoom: zoom,
+            from_zoom: zoom,
+            target_zoom: zoom,
+            internal_zoom: zoom,
 
-                send: send_filter,
-                receive: receive_server,
+            send: send_filter,
+            receive: receive_server,
 
-                current: [0.0, 0.0],
-                from: [0.0, 0.0],
-                target: [0.0, 0.0],
+            current: [0.0, 0.0],
+            from: [0.0, 0.0],
+            target: [0.0, 0.0],
 
-                progress: 1.,
+            progress: 1.,
 
-                screen_height,
-                screen_width,
-                screen_x,
-                screen_y,
+            screen_height,
+            screen_width,
+            screen_x,
+            screen_y,
 
-                property_zoom: None,
-                property_screen_x: None,
-                property_screen_y: None,
-                property_screen_width: None,
-                property_screen_height: None,
-                property_animation_time: None,
-            };
-
-            panic!("Failed to find correct effect params!");
-        } else {
-            panic!("Could not load crop filter effect!");
+            property_zoom: PropertyDescriptor {
+                name: CString::new("zoom").unwrap(),
+                description: CString::new("Amount to zoom in window").unwrap(),
+                specialization: PropertyDescriptorSpecializationF64 {
+                    min: 1.0,
+                    max: 5.0,
+                    step: 0.001,
+                    slider: true,
+                },
+            },
+            property_screen_x: PropertyDescriptor {
+                name: CString::new("screen_x").unwrap(),
+                description: CString::new("Offset relative to top left screen - x").unwrap(),
+                specialization: PropertyDescriptorSpecializationI32 {
+                    min: 0,
+                    max: 3840 * 3,
+                    step: 1,
+                    slider: false,
+                },
+            },
+            property_screen_y: PropertyDescriptor {
+                name: CString::new("screen_y").unwrap(),
+                description: CString::new("Offset relative to top left screen - y").unwrap(),
+                specialization: PropertyDescriptorSpecializationI32 {
+                    min: 0,
+                    max: 3840 * 3,
+                    step: 1,
+                    slider: false,
+                },
+            },
+            property_screen_width: PropertyDescriptor {
+                name: CString::new("screen_width").unwrap(),
+                description: CString::new("Screen width").unwrap(),
+                specialization: PropertyDescriptorSpecializationI32 {
+                    min: 1,
+                    max: 3840 * 3,
+                    step: 1,
+                    slider: false,
+                },
+            },
+            property_screen_height: PropertyDescriptor {
+                name: CString::new("screen_height").unwrap(),
+                description: CString::new("Screen height").unwrap(),
+                specialization: PropertyDescriptorSpecializationI32 {
+                    min: 1,
+                    max: 3840 * 3,
+                    step: 1,
+                    slider: false,
+                },
+            },
+            property_animation_time: PropertyDescriptor {
+                name: CString::new("animation_time").unwrap(),
+                description: CString::new("Animation Time (s)").unwrap(),
+                specialization: PropertyDescriptorSpecializationF64 {
+                    min: 0.3,
+                    max: 10.,
+                    step: 0.001,
+                    slider: false,
+                },
+            },
         }
     }
 }
@@ -369,33 +380,28 @@ impl UpdateSource<Data> for ScrollFocusFilter {
         settings: &mut SettingsContext,
         _context: &mut ActiveContext,
     ) {
+        println!("Update Start");
         if let Some(data) = data {
-            if let Some(zoom) = data.property_zoom.as_ref().map(|property| settings.get_property_value(property)) {
-                data.from_zoom = data.current_zoom;
-                data.internal_zoom = 1. / zoom;
-                data.target_zoom = 1. / zoom;
-            }
+            let zoom = settings.get_property_value(&data.property_zoom, &DEFAULT_ZOOM);
+            data.from_zoom = data.current_zoom;
+            data.internal_zoom = 1. / zoom;
+            data.target_zoom = 1. / zoom;
 
-            if let Some(screen_width) = data.property_screen_width.as_ref().map(|property| settings.get_property_value(property)) {
-                data.screen_width = screen_width as u32;
-            }
+            let screen_width = settings.get_property_value(&data.property_screen_width, &DEFAULT_SCREEN_WIDTH);
+            data.screen_width = screen_width as u32;
 
-            if let Some(screen_height) = data.property_screen_height.as_ref().map(|property| settings.get_property_value(property)) {
-                data.screen_height = screen_height as u32;
-            }
+            let screen_height = settings.get_property_value(&data.property_screen_height, &DEFAULT_SCREEN_HEIGHT);
+            data.screen_height = screen_height as u32;
 
-            if let Some(screen_x) = data.property_screen_x.as_ref().map(|property| settings.get_property_value(property)) {
-                data.screen_x = screen_x as u32;
-            }
+            let screen_x = settings.get_property_value(&data.property_screen_x, &DEFAULT_SCREEN_X);
+            data.screen_x = screen_x as u32;
 
-            if let Some(screen_y) = data.property_screen_y.as_ref().map(|property| settings.get_property_value(property)) {
-                data.screen_y = screen_y as u32;
-            }
+            let screen_y = settings.get_property_value(&data.property_screen_y, &DEFAULT_SCREEN_Y);
+            data.screen_y = screen_y as u32;
 
-            if let Some(animation_time) = data.property_animation_time.as_ref().map(|property| settings.get_property_value(property)) {
-                data.animation_time = animation_time;
-            }
+            data.animation_time = settings.get_property_value(&data.property_animation_time, &DEFAULT_ANIMATION_TIME);
         }
+        println!("Update End");
     }
 }
 

@@ -1,8 +1,11 @@
+use std::fmt::Debug;
 use std::path::PathBuf;
 use obs_sys::{
+    obs_properties_create, obs_properties_destroy,
     obs_data_t, obs_properties_t, obs_property_t,
     obs_data_get_bool, obs_data_get_double, obs_data_get_int, obs_data_get_json, obs_data_get_string,
     obs_data_set_bool, obs_data_set_double, obs_data_set_int, obs_data_set_string,
+    obs_data_set_default_bool, obs_data_set_default_double, obs_data_set_default_int, obs_data_set_default_string,
     obs_properties_add_float, obs_properties_add_float_slider, obs_properties_add_int, obs_properties_add_int_slider, obs_properties_add_bool, obs_properties_add_text, obs_properties_add_path,
 };
 use std::ffi::{CStr, CString, OsString};
@@ -12,22 +15,32 @@ use serde_json::Value;
 pub mod property_descriptors {
     use super::*;
 
-    pub trait PropertyDescriptor: Sized {
-        unsafe fn create_property(&self, name: *const c_char, description: *const c_char, properties: *mut obs_properties_t) -> *mut obs_property_t;
+    pub trait PropertyDescriptorSpecialization: Sized {
+        unsafe fn create_property(
+            &self,
+            name: *const c_char,
+            description: *const c_char,
+            properties: *mut obs_properties_t,
+        ) -> *mut obs_property_t;
     }
 
-    pub trait ValuePropertyDescriptor: PropertyDescriptor {
-        type ValueType;
+    pub trait ValuePropertyDescriptorSpecialization: PropertyDescriptorSpecialization {
+        type ValueType: Debug;
 
-        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t) -> Self::ValueType;
+        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t, default_value: &Self::ValueType) -> Self::ValueType;
         unsafe fn set_property_value(name: *const c_char, data: *mut obs_data_t, value: Self::ValueType);
     }
 
     #[derive(Clone)]
-    pub struct PropertyDescriptorBool {}
+    pub struct PropertyDescriptorSpecializationBool {}
 
-    impl PropertyDescriptor for PropertyDescriptorBool {
-        unsafe fn create_property(&self, name: *const c_char, description: *const c_char, properties: *mut obs_properties_t) -> *mut obs_property_t {
+    impl PropertyDescriptorSpecialization for PropertyDescriptorSpecializationBool {
+        unsafe fn create_property(
+            &self,
+            name: *const c_char,
+            description: *const c_char,
+            properties: *mut obs_properties_t,
+        ) -> *mut obs_property_t {
             obs_properties_add_bool(
                 properties,
                 name,
@@ -36,10 +49,11 @@ pub mod property_descriptors {
         }
     }
 
-    impl ValuePropertyDescriptor for PropertyDescriptorBool {
+    impl ValuePropertyDescriptorSpecialization for PropertyDescriptorSpecializationBool {
         type ValueType = bool;
 
-        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t) -> Self::ValueType {
+        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t, default_value: &Self::ValueType) -> Self::ValueType {
+            obs_data_set_default_bool(data, name, *default_value);
             obs_data_get_bool(data, name)
         }
 
@@ -49,15 +63,20 @@ pub mod property_descriptors {
     }
 
     #[derive(Clone)]
-    pub struct PropertyDescriptorI32 {
+    pub struct PropertyDescriptorSpecializationI32 {
         pub min: i32,
         pub max: i32,
         pub step: i32,
         pub slider: bool,
     }
 
-    impl PropertyDescriptor for PropertyDescriptorI32 {
-        unsafe fn create_property(&self, name: *const c_char, description: *const c_char, properties: *mut obs_properties_t) -> *mut obs_property_t {
+    impl PropertyDescriptorSpecialization for PropertyDescriptorSpecializationI32 {
+        unsafe fn create_property(
+            &self,
+            name: *const c_char,
+            description: *const c_char,
+            properties: *mut obs_properties_t,
+        ) -> *mut obs_property_t {
             if self.slider {
                 obs_properties_add_int_slider(
                     properties,
@@ -80,10 +99,11 @@ pub mod property_descriptors {
         }
     }
 
-    impl ValuePropertyDescriptor for PropertyDescriptorI32 {
+    impl ValuePropertyDescriptorSpecialization for PropertyDescriptorSpecializationI32 {
         type ValueType = i32;
 
-        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t) -> Self::ValueType {
+        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t, default_value: &Self::ValueType) -> Self::ValueType {
+            obs_data_set_default_int(data, name, *default_value as c_longlong);
             obs_data_get_int(data, name) as i32
         }
 
@@ -93,15 +113,20 @@ pub mod property_descriptors {
     }
 
     #[derive(Clone)]
-    pub struct PropertyDescriptorF64 {
+    pub struct PropertyDescriptorSpecializationF64 {
         pub min: f64,
         pub max: f64,
         pub step: f64,
         pub slider: bool,
     }
 
-    impl PropertyDescriptor for PropertyDescriptorF64 {
-        unsafe fn create_property(&self, name: *const c_char, description: *const c_char, properties: *mut obs_properties_t) -> *mut obs_property_t {
+    impl PropertyDescriptorSpecialization for PropertyDescriptorSpecializationF64 {
+        unsafe fn create_property(
+            &self,
+            name: *const c_char,
+            description: *const c_char,
+            properties: *mut obs_properties_t,
+        ) -> *mut obs_property_t {
             if self.slider {
                 obs_properties_add_float_slider(
                     properties,
@@ -124,10 +149,11 @@ pub mod property_descriptors {
         }
     }
 
-    impl ValuePropertyDescriptor for PropertyDescriptorF64 {
+    impl ValuePropertyDescriptorSpecialization for PropertyDescriptorSpecializationF64 {
         type ValueType = f64;
 
-        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t) -> Self::ValueType {
+        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t, default_value: &Self::ValueType) -> Self::ValueType {
+            obs_data_set_default_double(data, name, *default_value);
             obs_data_get_double(data, name)
         }
 
@@ -145,12 +171,17 @@ pub mod property_descriptors {
     }
 
     #[derive(Clone)]
-    pub struct PropertyDescriptorString {
+    pub struct PropertyDescriptorSpecializationString {
         pub string_type: StringType,
     }
 
-    impl PropertyDescriptor for PropertyDescriptorString {
-        unsafe fn create_property(&self, name: *const c_char, description: *const c_char, properties: *mut obs_properties_t) -> *mut obs_property_t {
+    impl PropertyDescriptorSpecialization for PropertyDescriptorSpecializationString {
+        unsafe fn create_property(
+            &self,
+            name: *const c_char,
+            description: *const c_char,
+            properties: *mut obs_properties_t,
+        ) -> *mut obs_property_t {
             obs_properties_add_text(
                 properties,
                 name,
@@ -160,10 +191,13 @@ pub mod property_descriptors {
         }
     }
 
-    impl ValuePropertyDescriptor for PropertyDescriptorString {
+    impl ValuePropertyDescriptorSpecialization for PropertyDescriptorSpecializationString {
         type ValueType = String;
 
-        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t) -> Self::ValueType {
+        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t, default_value: &Self::ValueType) -> Self::ValueType {
+            let c_string = CString::new(default_value.as_str()).expect("Could not convert string to C string.");
+
+            obs_data_set_default_string(data, name, c_string.as_ptr());
             CStr::from_ptr(obs_data_get_string(data, name)).to_string_lossy().to_string()
         }
 
@@ -182,14 +216,19 @@ pub mod property_descriptors {
     }
 
     #[derive(Clone)]
-    pub struct PropertyDescriptorPath {
+    pub struct PropertyDescriptorSpecializationPath {
         pub path_type: PathType,
         pub filter: CString,
         pub default_path: CString,
     }
 
-    impl PropertyDescriptor for PropertyDescriptorPath {
-        unsafe fn create_property(&self, name: *const c_char, description: *const c_char, properties: *mut obs_properties_t) -> *mut obs_property_t {
+    impl PropertyDescriptorSpecialization for PropertyDescriptorSpecializationPath {
+        unsafe fn create_property(
+            &self,
+            name: *const c_char,
+            description: *const c_char,
+            properties: *mut obs_properties_t,
+        ) -> *mut obs_property_t {
             obs_properties_add_path(
                 properties,
                 name,
@@ -201,10 +240,15 @@ pub mod property_descriptors {
         }
     }
 
-    impl ValuePropertyDescriptor for PropertyDescriptorPath {
+    impl ValuePropertyDescriptorSpecialization for PropertyDescriptorSpecializationPath {
         type ValueType = PathBuf;
 
-        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t) -> Self::ValueType {
+        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t, default_value: &Self::ValueType) -> Self::ValueType {
+            let c_string_default = CString::new(default_value.to_string_lossy().as_ref())
+                .expect("Could not convert string to C string.");
+
+            obs_data_set_default_string(data, name, c_string_default.as_ptr());
+
             let c_slice = CStr::from_ptr(obs_data_get_string(data, name)).to_string_lossy();
             let os_string = OsString::from(c_slice.to_string());
 
@@ -220,55 +264,40 @@ pub mod property_descriptors {
 
     // TODO: Implement the property kinds below
     #[derive(Clone)]
-    pub struct PropertyDescriptorList {
+    pub struct PropertyDescriptorSpecializationList {
         // TODO
     }
-    pub struct PropertyDescriptorButton {
+    pub struct PropertyDescriptorSpecializationButton {
         /// Callback for when a button property is clicked. If the properties
         /// need to be refreshed due to changes to the property layout, return true,
         /// otherwise return false.
         pub callback: Box<dyn Fn() -> bool>,
     }
     #[derive(Clone)]
-    pub struct PropertyDescriptorFont {}
+    pub struct PropertyDescriptorSpecializationFont {}
     #[derive(Clone)]
-    pub struct PropertyDescriptorListEditable {
+    pub struct PropertyDescriptorSpecializationListEditable {
         // TODO
     }
     #[derive(Clone)]
-    pub struct PropertyDescriptorFrameRate {}
-    pub struct PropertyDescriptorGroup {
+    pub struct PropertyDescriptorSpecializationFrameRate {}
+    pub struct PropertyDescriptorSpecializationGroup {
+        // Make sure not to `drop` the Properties
         pub properties: Properties,
     }
 }
 
 pub use property_descriptors::*;
 
-pub struct Property<T: PropertyDescriptor> {
-    inner: *mut obs_property_t,
-    name: CString,
-    description: CString,
-    descriptor: T,
+pub struct PropertyDescriptor<T: PropertyDescriptorSpecialization> {
+    pub name: CString,
+    pub description: CString,
+    pub specialization: T,
 }
-
-// pub(crate) struct Property {
-//     name: &'static str,
-//     property_type: PropertyType,
-// }
-
-// enum PropertyType {
-//     Float(f64, f64),
-//     Int(i32, i32),
-// }
 
 pub struct Properties {
     inner: *mut obs_properties_t,
 }
-
-// pub struct Properties<'a> {
-//     pointer: *mut obs_properties_t,
-//     properties: &'a mut Vec<Property>,
-// }
 
 impl Properties {
     pub(crate) unsafe fn from_raw(
@@ -279,24 +308,31 @@ impl Properties {
         }
     }
 
-    /// # Safety
-    /// Modifying this pointer could cause UB
-    pub unsafe fn into_raw(self) -> *mut obs_properties_t {
+    pub fn new() -> Self {
+        unsafe {
+            Self::from_raw(obs_properties_create())
+        }
+    }
+
+    pub(crate) unsafe fn as_raw(&self) -> *mut obs_properties_t {
         self.inner
     }
 
-    pub fn add_property<T: PropertyDescriptor>(&mut self, name: String, description: String, property_descriptor: T) -> Property<T> {
-        let name = CString::new(name).expect("Invalid property name.");
-        let description = CString::new(description).expect("Invalid property description.");
-        let inner = unsafe {
-            property_descriptor.create_property(name.as_ptr(), description.as_ptr(), self.inner)
-        };
+    pub fn add_property<T: PropertyDescriptorSpecialization>(&mut self, descriptor: &PropertyDescriptor<T>) {
+        unsafe {
+            descriptor.specialization.create_property(
+                descriptor.name.as_ptr(),
+                descriptor.description.as_ptr(),
+                self.inner,
+            );
+        }
+    }
+}
 
-        Property {
-            inner,
-            name,
-            description,
-            descriptor: property_descriptor,
+impl Drop for Properties {
+    fn drop(&mut self) {
+        unsafe {
+            obs_properties_destroy(self.inner);
         }
     }
 }
@@ -339,15 +375,15 @@ impl SettingsContext {
         &self.init_data
     }
 
-    pub fn get_property_value<T: ValuePropertyDescriptor>(&self, property: &Property<T>) -> T::ValueType {
+    pub fn get_property_value<T: ValuePropertyDescriptorSpecialization>(&mut self, descriptor: &PropertyDescriptor<T>, default_value: &T::ValueType) -> T::ValueType {
         unsafe {
-            <T as ValuePropertyDescriptor>::get_property_value(property.name.as_ptr(), self.settings)
+            <T as ValuePropertyDescriptorSpecialization>::get_property_value(descriptor.name.as_ptr(), self.settings, default_value)
         }
     }
 
-    pub fn set_property_value<T: ValuePropertyDescriptor>(&self, property: &Property<T>, value: T::ValueType) {
+    pub fn set_property_value<T: ValuePropertyDescriptorSpecialization>(&mut self, descriptor: &PropertyDescriptor<T>, value: T::ValueType) {
         unsafe {
-            <T as ValuePropertyDescriptor>::set_property_value(property.name.as_ptr(), self.settings, value);
+            <T as ValuePropertyDescriptorSpecialization>::set_property_value(descriptor.name.as_ptr(), self.settings, value);
         }
     }
 }

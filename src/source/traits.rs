@@ -41,7 +41,7 @@ pub trait AudioRenderSource<D> {
 }
 
 pub trait GetPropertiesSource<D> {
-    fn get_properties(data: &mut Option<D>, properties: &mut Properties);
+    fn get_properties(data: &Option<D>) -> Properties;
 }
 
 pub trait VideoTickSource<D> {
