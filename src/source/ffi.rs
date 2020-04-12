@@ -84,9 +84,7 @@ pub unsafe extern "C" fn update<D, F: UpdateSource<D>>(
 ) {
     let context = PluginContext::<D>::from(data);
     let mut active = ActiveContext::default();
-    let data: &mut DataWrapper<D> = &mut *(data as *mut DataWrapper<D>);
-    let mut settings = SettingsContext::from_raw(settings);
-    F::update(context, &mut settings, &mut active);
+    F::update(context, &mut active);
 }
 
 pub unsafe extern "C" fn video_render<D, F: VideoRenderSource<D>>(

@@ -67,7 +67,7 @@ pub trait CreatableSource<D> {
 }
 
 pub trait UpdateSource<D> {
-    fn update(context: PluginContext<D>, settings: &mut SettingsContext, context: &mut ActiveContext);
+    fn update(context: PluginContext<D>, context: &mut ActiveContext);
 }
 
 pub trait VideoRenderSource<D> {

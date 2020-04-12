@@ -370,10 +370,11 @@ impl CreatableSource<Data> for ScrollFocusFilter {
 impl UpdateSource<Data> for ScrollFocusFilter {
     fn update(
         mut context: PluginContext<Data>,
-        settings: &mut SettingsContext,
         _context: &mut ActiveContext,
     ) {
-        if let Some(data) = context.data_mut() {
+        let (data, settings) = context.data_settings_mut();
+
+        if let Some(data) = data {
             let zoom = settings.get_property_value(&data.property_zoom, &DEFAULT_ZOOM);
             data.from_zoom = data.current_zoom;
             data.internal_zoom = 1. / zoom;
