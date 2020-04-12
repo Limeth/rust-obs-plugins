@@ -126,6 +126,8 @@ pub mod log;
 pub mod module;
 /// Tools for creating sources
 pub mod source;
+/// Tools for handling audio
+pub mod audio;
 
 /// Re-exports of a bunch of popular tools
 pub mod prelude {
