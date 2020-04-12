@@ -18,7 +18,7 @@ use obs_sys::{
     obs_source_process_filter_end, obs_source_skip_video_filter, obs_source_t, obs_source_type,
     obs_source_type_OBS_SOURCE_TYPE_FILTER, obs_source_type_OBS_SOURCE_TYPE_INPUT,
     obs_source_type_OBS_SOURCE_TYPE_SCENE, obs_source_type_OBS_SOURCE_TYPE_TRANSITION,
-    obs_source_update, OBS_SOURCE_VIDEO, obs_icon_type_OBS_ICON_TYPE_UNKNOWN
+    obs_source_update, obs_source_update_properties, OBS_SOURCE_VIDEO, obs_icon_type_OBS_ICON_TYPE_UNKNOWN
 };
 
 use super::{
@@ -136,6 +136,13 @@ impl SourceContext {
     pub fn update_source_settings(&mut self, settings: &SettingsContext) {
         unsafe {
             obs_source_update(self.source, settings.as_raw());
+        }
+    }
+
+    /// Update the source settings based on a settings context.
+    pub fn update_source_properties(&mut self) {
+        unsafe {
+            obs_source_update_properties(self.source);
         }
     }
 }
