@@ -225,7 +225,7 @@ impl VideoRenderSource<Data> for ScrollFocusFilter {
 impl CreatableSource<Data> for ScrollFocusFilter {
     fn create(settings: &mut SettingsContext, mut source: SourceContext) -> Data {
         let effect_string = CString::new(include_str!("./crop_filter.effect")).unwrap();
-        let mut effect = if let Some(effect) = GraphicsEffect::from_effect_string(
+        let effect = if let Some(effect) = GraphicsEffect::from_effect_string(
             effect_string.as_c_str(),
             cstr!("crop_filter.effect"),
         ) {
@@ -234,9 +234,9 @@ impl CreatableSource<Data> for ScrollFocusFilter {
             panic!("Could not load crop filter effect!");
         };
 
-        let param_image = effect.get_effect_param_by_name(cstr!("image"));
-        let param_add_val = effect.get_effect_param_by_name(cstr!("add_val"));
-        let param_mul_val = effect.get_effect_param_by_name(cstr!("mul_val"));
+        let param_image = effect.get_param_by_name(cstr!("image"));
+        let param_add_val = effect.get_param_by_name(cstr!("add_val"));
+        let param_mul_val = effect.get_param_by_name(cstr!("mul_val"));
 
         if param_image.is_none() || param_add_val.is_none() || param_mul_val.is_none() {
             panic!("Failed to find correct effect params!");

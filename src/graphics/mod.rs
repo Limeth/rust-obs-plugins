@@ -32,6 +32,8 @@ use obs_sys::{
     gs_shader_param_type_GS_SHADER_PARAM_VEC3, gs_shader_param_type_GS_SHADER_PARAM_VEC4,
     obs_allow_direct_render, obs_allow_direct_render_OBS_ALLOW_DIRECT_RENDERING,
     obs_allow_direct_render_OBS_NO_DIRECT_RENDERING, obs_enter_graphics, obs_leave_graphics, vec2,
+    gs_effect_get_num_params,
+    gs_effect_get_param_by_idx,
     vec3, vec4,
     gs_effect_set_bool,
     gs_effect_set_float,
@@ -299,8 +301,28 @@ impl GraphicsEffect {
         }
     }
 
-    pub fn get_effect_param_by_name(
-        &mut self,
+    pub fn get_param_count(&self) -> usize {
+        unsafe {
+            gs_effect_get_num_params(self.raw as *const _) as usize
+        }
+    }
+
+    pub fn get_param_by_index(
+        &self,
+        index: usize,
+    ) -> Option<GraphicsEffectParam> {
+        unsafe {
+            let pointer = gs_effect_get_param_by_idx(self.raw, index as size_t);
+            if !pointer.is_null() {
+                Some(GraphicsEffectParam::from_raw(pointer))
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn get_param_by_name(
+        &self,
         name: &CStr,
     ) -> Option<GraphicsEffectParam> {
         unsafe {
@@ -310,6 +332,36 @@ impl GraphicsEffect {
             } else {
                 None
             }
+        }
+    }
+
+    pub fn params_iter<'a>(&'a self) -> impl Iterator<Item=GraphicsEffectParam> + 'a {
+        struct EffectParamIterator<'a> {
+            effect: &'a GraphicsEffect,
+            next_index: usize,
+            len: usize,
+        }
+
+        impl<'a> Iterator for EffectParamIterator<'a> {
+            type Item = GraphicsEffectParam;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.next_index < self.len {
+                    let param = self.effect.get_param_by_index(self.next_index)
+                        .expect("An effect parameter went unexpectedly missing.");
+                    self.next_index += 1;
+
+                    Some(param)
+                } else {
+                    None
+                }
+            }
+        }
+
+        EffectParamIterator {
+            len: self.get_param_count(),
+            effect: self,
+            next_index: 0,
         }
     }
 
@@ -328,10 +380,6 @@ impl Drop for GraphicsEffect {
             obs_leave_graphics();
         }
     }
-}
-
-pub enum GraphicsEffectParamConversionError {
-    InvalidType,
 }
 
 pub struct GraphicsEffectParam {
