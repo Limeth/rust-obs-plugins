@@ -85,8 +85,8 @@ impl GetNameSource<Data> for ScrollFocusFilter {
 }
 
 impl GetPropertiesSource<Data> for ScrollFocusFilter {
-    fn get_properties(data: &Option<Data>) -> Properties {
-        let data = data.as_ref().unwrap();
+    fn get_properties(context: PluginContext<Data>) -> Properties {
+        let data = context.data().as_ref().unwrap();
         let mut properties = Properties::new();
 
         properties.add_property(&data.property_zoom);
@@ -106,8 +106,8 @@ fn smooth_step(x: f32) -> f32 {
 }
 
 impl VideoTickSource<Data> for ScrollFocusFilter {
-    fn video_tick(data: &mut Option<Data>, seconds: f32) {
-        if let Some(data) = data {
+    fn video_tick(mut context: PluginContext<Data>, seconds: f32) {
+        if let Some(data) = context.data_mut() {
             for message in data.receive.try_iter() {
                 match message {
                     ServerMessage::Snapshot(snapshot) => {
@@ -182,11 +182,11 @@ impl VideoTickSource<Data> for ScrollFocusFilter {
 
 impl VideoRenderSource<Data> for ScrollFocusFilter {
     fn video_render(
-        data: &mut Option<Data>,
+        mut context: PluginContext<Data>,
         _context: &mut ActiveContext,
         render: &mut VideoRenderContext,
     ) {
-        if let Some(data) = data {
+        if let Some(data) = context.data_mut() {
             let effect = &mut data.effect;
             let source = &mut data.source;
             let param_add = &mut data.add_val;
@@ -369,12 +369,11 @@ impl CreatableSource<Data> for ScrollFocusFilter {
 
 impl UpdateSource<Data> for ScrollFocusFilter {
     fn update(
-        data: &mut Option<Data>,
+        mut context: PluginContext<Data>,
         settings: &mut SettingsContext,
         _context: &mut ActiveContext,
     ) {
-        println!("Update Start");
-        if let Some(data) = data {
+        if let Some(data) = context.data_mut() {
             let zoom = settings.get_property_value(&data.property_zoom, &DEFAULT_ZOOM);
             data.from_zoom = data.current_zoom;
             data.internal_zoom = 1. / zoom;
@@ -394,7 +393,6 @@ impl UpdateSource<Data> for ScrollFocusFilter {
 
             data.animation_time = settings.get_property_value(&data.property_animation_time, &DEFAULT_ANIMATION_TIME);
         }
-        println!("Update End");
     }
 }
 

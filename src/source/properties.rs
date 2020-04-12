@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use obs_sys::{
@@ -7,7 +8,9 @@ use obs_sys::{
     obs_data_set_bool, obs_data_set_double, obs_data_set_int, obs_data_set_string,
     obs_data_set_default_bool, obs_data_set_default_double, obs_data_set_default_int, obs_data_set_default_string,
     obs_properties_add_float, obs_properties_add_float_slider, obs_properties_add_int, obs_properties_add_int_slider, obs_properties_add_bool, obs_properties_add_text, obs_properties_add_path,
+    obs_properties_add_button2,
 };
+use std::sync::Arc;
 use std::ffi::{CStr, CString, OsString};
 use std::os::raw::{c_char, c_longlong};
 use serde_json::Value;
@@ -262,16 +265,65 @@ pub mod property_descriptors {
         }
     }
 
+    pub unsafe extern "C" fn button_callback_global(
+        _props: *mut obs_properties_t,
+        _property: *mut obs_property_t,
+        data: *mut ::std::os::raw::c_void,
+    ) -> bool {
+        let callback_ptr = data as *mut Arc<Box<dyn Fn() -> bool>>;
+        let callback: Box<Arc<Box<dyn Fn() -> bool>>> = Box::from_raw(callback_ptr);
+        let result = (callback)();
+
+        std::mem::forget(callback);
+
+        result
+    }
+
+    #[derive(Clone)]
+    pub struct PropertyDescriptorSpecializationButton {
+        callback: Arc<Box<dyn Fn() -> bool>>,
+    }
+
+    impl PropertyDescriptorSpecializationButton {
+        /// Callback for when a button property is clicked. If the properties
+        /// need to be refreshed due to changes to the property layout, return true,
+        /// otherwise return false.
+        pub fn new(
+            callback: Box<dyn Fn() -> bool>,
+        ) -> Self {
+            Self {
+                callback: Arc::new(callback),
+            }
+        }
+    }
+
+    impl PropertyDescriptorSpecialization for PropertyDescriptorSpecializationButton {
+        unsafe fn create_property(
+            &self,
+            name: *const c_char,
+            description: *const c_char,
+            properties: *mut obs_properties_t,
+        ) -> *mut obs_property_t {
+            // FIXME: This probably leaks. I am not sure how OBS frees the custom data.
+            // Outer box: To be freed by OBS
+            // Arc: To enable cloning of the closure
+            // Inner box: To enable calling of the closure
+            let callback_ptr: *mut Arc<Box<dyn Fn() -> bool>> = Box::into_raw(Box::new(self.callback.clone()));
+
+            obs_properties_add_button2(
+                properties,
+                name,
+                description,
+                Some(button_callback_global),
+                callback_ptr as *mut _,
+            )
+        }
+    }
+
     // TODO: Implement the property kinds below
     #[derive(Clone)]
     pub struct PropertyDescriptorSpecializationList {
         // TODO
-    }
-    pub struct PropertyDescriptorSpecializationButton {
-        /// Callback for when a button property is clicked. If the properties
-        /// need to be refreshed due to changes to the property layout, return true,
-        /// otherwise return false.
-        pub callback: Box<dyn Fn() -> bool>,
     }
     #[derive(Clone)]
     pub struct PropertyDescriptorSpecializationFont {}
