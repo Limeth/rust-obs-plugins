@@ -34,6 +34,8 @@ use obs_sys::{
     obs_allow_direct_render_OBS_NO_DIRECT_RENDERING, obs_enter_graphics, obs_leave_graphics, vec2,
     gs_effect_get_num_params,
     gs_effect_get_param_by_idx,
+    gs_effect_get_default_val_size,
+    gs_effect_get_default_val,
     vec3, vec4,
     gs_effect_set_bool,
     gs_effect_set_float,
@@ -55,6 +57,15 @@ pub mod shader_param_types {
         type RustType;
 
         unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType);
+
+        unsafe fn get_param_value_default<'a>(param: *mut gs_eparam_t) -> &'a Self::RustType {
+            // This test does not seem to be passing, but the values seem to be right.
+            // assert_eq!(gs_effect_get_default_val_size(param) as usize, std::mem::size_of::<Self::RustType>());
+            let ptr = gs_effect_get_default_val(param);
+
+            &*(ptr as *const Self::RustType)
+        }
+
         fn corresponding_enum_variant() -> ShaderParamTypeKind;
     }
 
@@ -217,6 +228,11 @@ pub mod shader_param_types {
             unimplemented!();
         }
 
+        unsafe fn get_param_value_default<'a>(param: *mut gs_eparam_t) -> &'a Self::RustType {
+            // TODO
+            unimplemented!();
+        }
+
         fn corresponding_enum_variant() -> ShaderParamTypeKind {
             ShaderParamTypeKind::Texture
         }
@@ -225,7 +241,7 @@ pub mod shader_param_types {
 
 pub use shader_param_types::*;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ShaderParamTypeKind {
     Unknown,
     Bool,
@@ -437,6 +453,12 @@ impl<T: ShaderParamType> GraphicsEffectParamTyped<T> {
     pub fn set_param_value(&mut self, value: <T as ShaderParamType>::RustType) {
         unsafe {
             <T as ShaderParamType>::set_param_value(self.inner.raw, value);
+        }
+    }
+
+    pub fn get_param_value_default<'a>(&'a mut self) -> &'a <T as ShaderParamType>::RustType {
+        unsafe {
+            <T as ShaderParamType>::get_param_value_default::<'a>(self.inner.raw)
         }
     }
 }
