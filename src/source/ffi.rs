@@ -1,9 +1,10 @@
-use super::context::{ActiveContext, VideoRenderContext};
 use super::properties::{Properties, SettingsContext};
 use super::traits::*;
 use super::{EnumActiveContext, EnumAllContext, SourceContext};
 use std::ffi::c_void;
 use std::os::raw::c_char;
+use crate::graphics::*;
+use crate::context::*;
 
 use obs_sys::{
     gs_effect_t, obs_data_t, obs_properties, obs_properties_create, obs_source_audio_mix,
@@ -83,8 +84,7 @@ pub unsafe extern "C" fn update<D, F: UpdateSource<D>>(
     settings: *mut obs_data_t,
 ) {
     let context = PluginContext::<D>::from(data);
-    let mut active = ActiveContext::default();
-    F::update(context, &mut active);
+    F::update(context);
 }
 
 pub unsafe extern "C" fn video_render<D, F: VideoRenderSource<D>>(
@@ -92,9 +92,8 @@ pub unsafe extern "C" fn video_render<D, F: VideoRenderSource<D>>(
     _effect: *mut gs_effect_t,
 ) {
     let context = PluginContext::<D>::from(data);
-    let mut active = ActiveContext::default();
-    let mut render = VideoRenderContext::default();
-    F::video_render(context, &mut active, &mut render);
+    let mut graphics_context = GraphicsContext::get_current().unwrap();
+    F::video_render(context, &mut graphics_context);
 }
 
 pub unsafe extern "C" fn audio_render<D, F: AudioRenderSource<D>>(
@@ -105,11 +104,12 @@ pub unsafe extern "C" fn audio_render<D, F: AudioRenderSource<D>>(
     _channels: size_t,
     _sample_rate: size_t,
 ) -> bool {
+    // TODO
+
     let context = PluginContext::<D>::from(data);
-    let mut active = ActiveContext::default();
-    F::audio_render(context, &mut active);
-    // TODO: understand what this bool is
-    true
+    F::audio_render(context);
+
+    true // indicates success. if false, marks the source as `audio_pending`
 }
 
 pub unsafe extern "C" fn get_properties<D, F: GetPropertiesSource<D>>(

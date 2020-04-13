@@ -1,9 +1,9 @@
-use super::context::{ActiveContext, VideoRenderContext};
 use super::properties::{Properties, SettingsContext};
 use super::{EnumActiveContext, EnumAllContext, SourceContext, SourceType};
 use std::ffi::CStr;
 use std::ffi::c_void;
 use crate::source::ffi::DataWrapper;
+use crate::graphics::*;
 
 pub struct PluginContext<'a, D> {
     data_wrapper: &'a mut DataWrapper<D>,
@@ -67,19 +67,18 @@ pub trait CreatableSource<D> {
 }
 
 pub trait UpdateSource<D> {
-    fn update(context: PluginContext<D>, context: &mut ActiveContext);
+    fn update(context: PluginContext<D>);
 }
 
 pub trait VideoRenderSource<D> {
     fn video_render(
         context: PluginContext<D>,
-        context: &mut ActiveContext,
-        render: &mut VideoRenderContext,
+        graphics_context: &mut GraphicsContext,
     );
 }
 
 pub trait AudioRenderSource<D> {
-    fn audio_render(context: PluginContext<D>, context: &mut ActiveContext);
+    fn audio_render(context: PluginContext<D>);
 }
 
 pub trait GetPropertiesSource<D> {

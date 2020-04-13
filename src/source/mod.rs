@@ -1,14 +1,13 @@
 #![allow(non_upper_case_globals)]
 
 use paste::item;
+use crate::context::*;
 
 mod ffi;
 
-pub mod context;
 pub mod properties;
 pub mod traits;
 
-pub use context::*;
 pub use properties::*;
 pub use traits::*;
 
@@ -23,7 +22,7 @@ use obs_sys::{
 
 use super::{
     graphics::{
-        GraphicsAllowDirectRendering, GraphicsColorFormat, GraphicsEffect, GraphicsEffectContext,
+        GraphicsAllowDirectRendering, ColorFormatKind, GraphicsEffect, GraphicsContext,
     },
 };
 
@@ -110,12 +109,11 @@ impl SourceContext {
     /// See [OBS documentation](https://obsproject.com/docs/reference-sources.html#c.obs_source_process_filter_begin)
     ///
     /// Note: only works with sources that are filters.
-    pub fn process_filter<F: FnOnce(&mut GraphicsEffectContext, &mut GraphicsEffect)>(
+    pub fn process_filter<F: FnOnce(&mut GraphicsContext, &mut GraphicsEffect)>(
         &mut self,
-        _render: &mut VideoRenderContext,
         effect: &mut GraphicsEffect,
         (cx, cy): (u32, u32),
-        format: GraphicsColorFormat,
+        format: ColorFormatKind,
         direct: GraphicsAllowDirectRendering,
         func: F,
     ) {
@@ -123,8 +121,8 @@ impl SourceContext {
             if let Some(SourceType::FILTER) =
                 SourceType::from_native(obs_source_get_type(self.source))
             {
-                if obs_source_process_filter_begin(self.source, format.as_raw(), direct.as_raw()) {
-                    let mut context = GraphicsEffectContext::new();
+                if obs_source_process_filter_begin(self.source, format.into_raw(), direct.as_raw()) {
+                    let mut context = GraphicsContext::enter().unwrap();
                     func(&mut context, effect);
                     obs_source_process_filter_end(self.source, effect.as_ptr(), cx, cy);
                 }

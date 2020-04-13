@@ -1,7 +1,7 @@
 mod server;
 
 use server::{Server, WindowSnapshot};
-use obs_wrapper::{graphics::*, obs_register_module, prelude::*, source::*};
+use obs_wrapper::{context::*, graphics::*, obs_register_module, prelude::*, source::*};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::ffi::{CStr, CString};
 
@@ -22,13 +22,13 @@ const DEFAULT_ANIMATION_TIME: f64 = 0.3;
 
 struct Data {
     source: SourceContext,
-    effect: GraphicsEffect,
+    effect: GraphicsContextDependentDisabled<GraphicsEffect>,
 
-    mul_val: GraphicsEffectParamTyped<ShaderParamTypeVec2>,
-    add_val: GraphicsEffectParamTyped<ShaderParamTypeVec2>,
-    image: GraphicsEffectParamTyped<ShaderParamTypeTexture>,
+    mul_val: GraphicsContextDependentDisabled<GraphicsEffectParamTyped<ShaderParamTypeVec2>>,
+    add_val: GraphicsContextDependentDisabled<GraphicsEffectParamTyped<ShaderParamTypeVec2>>,
+    image: GraphicsContextDependentDisabled<GraphicsEffectParamTyped<ShaderParamTypeTexture>>,
 
-    sampler: GraphicsSamplerState,
+    sampler: GraphicsContextDependentDisabled<GraphicsSamplerState>,
 
     send: Sender<FilterMessage>,
     receive: Receiver<ServerMessage>,
@@ -183,16 +183,15 @@ impl VideoTickSource<Data> for ScrollFocusFilter {
 impl VideoRenderSource<Data> for ScrollFocusFilter {
     fn video_render(
         mut context: PluginContext<Data>,
-        _context: &mut ActiveContext,
-        render: &mut VideoRenderContext,
+        graphics_context: &mut GraphicsContext,
     ) {
         if let Some(data) = context.data_mut() {
-            let effect = &mut data.effect;
+            let effect = &mut data.effect.as_enabled_mut(graphics_context);
             let source = &mut data.source;
-            let param_add = &mut data.add_val;
-            let param_mul = &mut data.mul_val;
-            let image = &mut data.image;
-            let sampler = &mut data.sampler;
+            let param_add = &mut data.add_val.as_enabled_mut(graphics_context);
+            let param_mul = &mut data.mul_val.as_enabled_mut(graphics_context);
+            let image = &mut data.image.as_enabled_mut(graphics_context);
+            let sampler = &mut data.sampler.as_enabled_mut(graphics_context);
 
             let current = &mut data.current;
 
@@ -207,14 +206,13 @@ impl VideoRenderSource<Data> for ScrollFocusFilter {
             });
 
             source.process_filter(
-                render,
                 effect,
                 (cx, cy),
-                GraphicsColorFormat::RGBA,
+                ColorFormatKind::RGBA,
                 GraphicsAllowDirectRendering::NoDirectRendering,
                 |context, _effect| {
-                    param_add.set_param_value(*current);
-                    param_mul.set_param_value([zoom, zoom]);
+                    param_add.set_param_value(current);
+                    param_mul.set_param_value(&[zoom, zoom]);
                     image.set_next_sampler(context, sampler);
                 },
             );
@@ -224,10 +222,13 @@ impl VideoRenderSource<Data> for ScrollFocusFilter {
 
 impl CreatableSource<Data> for ScrollFocusFilter {
     fn create(settings: &mut SettingsContext, mut source: SourceContext) -> Data {
+        let graphics_context = GraphicsContext::enter()
+            .expect("Could not enter the graphics context during the creation of the plugin.");
         let effect_string = CString::new(include_str!("./crop_filter.effect")).unwrap();
         let effect = if let Some(effect) = GraphicsEffect::from_effect_string(
             effect_string.as_c_str(),
             cstr!("crop_filter.effect"),
+            &graphics_context,
         ) {
             effect
         } else {
@@ -246,7 +247,7 @@ impl CreatableSource<Data> for ScrollFocusFilter {
         let param_add_val = param_add_val.unwrap().downcast::<ShaderParamTypeVec2>().unwrap();
         let param_mul_val = param_mul_val.unwrap().downcast::<ShaderParamTypeVec2>().unwrap();
 
-        let sampler = GraphicsSamplerState::from(GraphicsSamplerInfo::default());
+        let sampler = GraphicsContextDependentEnabled::<GraphicsSamplerState>::from(GraphicsSamplerInfo::new(&graphics_context));
 
         let (send_filter, receive_filter) = unbounded::<FilterMessage>();
         let (send_server, receive_server) = unbounded::<ServerMessage>();
@@ -275,12 +276,12 @@ impl CreatableSource<Data> for ScrollFocusFilter {
 
         Data {
             source,
-            effect,
-            add_val: param_add_val,
-            mul_val: param_mul_val,
-            image: param_image,
+            effect: effect.disable(),
+            add_val: param_add_val.disable(),
+            mul_val: param_mul_val.disable(),
+            image: param_image.disable(),
 
-            sampler,
+            sampler: sampler.disable(),
 
             animation_time: DEFAULT_ANIMATION_TIME,
 
@@ -370,7 +371,6 @@ impl CreatableSource<Data> for ScrollFocusFilter {
 impl UpdateSource<Data> for ScrollFocusFilter {
     fn update(
         mut context: PluginContext<Data>,
-        _context: &mut ActiveContext,
     ) {
         let (data, settings) = context.data_settings_mut();
 

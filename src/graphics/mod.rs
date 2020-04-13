@@ -1,9 +1,14 @@
+use std::fmt::Debug;
 use std::mem;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_void;
+use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 use core::convert::TryFrom;
 use obs_sys::{
     size_t,
+    graphics_t,
+    gs_get_context,
     gs_address_mode, gs_address_mode_GS_ADDRESS_BORDER, gs_address_mode_GS_ADDRESS_CLAMP,
     gs_address_mode_GS_ADDRESS_MIRROR, gs_address_mode_GS_ADDRESS_MIRRORONCE,
     gs_address_mode_GS_ADDRESS_WRAP, gs_color_format, gs_color_format_GS_A8,
@@ -49,15 +54,22 @@ use obs_sys::{
 };
 use paste::item;
 use cstr::cstr;
+use crate::context::*;
+
+mod texture;
+
+pub use texture::*;
 
 pub mod shader_param_types {
     use super::*;
 
     pub trait ShaderParamType {
-        type RustType;
+        type RustType: Debug;
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType);
+        /// May only be called in a graphics context.
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType);
 
+        /// May only be called in a graphics context.
         unsafe fn get_param_value_default<'a>(param: *mut gs_eparam_t) -> &'a Self::RustType {
             // This test does not seem to be passing, but the values seem to be right.
             // assert_eq!(gs_effect_get_default_val_size(param) as usize, std::mem::size_of::<Self::RustType>());
@@ -73,8 +85,8 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeBool {
         type RustType = bool;
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
-            gs_effect_set_bool(param, value);
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+            gs_effect_set_bool(param, *value);
         }
 
         fn corresponding_enum_variant() -> ShaderParamTypeKind {
@@ -86,8 +98,8 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeFloat {
         type RustType = f32;
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
-            gs_effect_set_float(param, value);
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+            gs_effect_set_float(param, *value);
         }
 
         fn corresponding_enum_variant() -> ShaderParamTypeKind {
@@ -99,8 +111,8 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeInt {
         type RustType = i32;
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
-            gs_effect_set_int(param, value);
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+            gs_effect_set_int(param, *value);
         }
 
         fn corresponding_enum_variant() -> ShaderParamTypeKind {
@@ -112,7 +124,7 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeVec2 {
         type RustType = [f32; 2];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
             let mut value = Vec2::new(value[0], value[1]);
             gs_effect_set_vec2(param, value.as_ptr());
         }
@@ -126,7 +138,7 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeVec3 {
         type RustType = [f32; 3];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
             let mut value = Vec3::new(value[0], value[1], value[2]);
             gs_effect_set_vec3(param, value.as_ptr());
         }
@@ -140,7 +152,7 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeVec4 {
         type RustType = [f32; 4];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
             let mut value = Vec4::new(value[0], value[1], value[2], value[3]);
             gs_effect_set_vec4(param, value.as_ptr());
         }
@@ -154,10 +166,10 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeIVec2 {
         type RustType = [i32; 2];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
             gs_effect_set_val(
                 param,
-                (&value) as *const _ as *const c_void,
+                value as *const _ as *const c_void,
                 mem::size_of::<Self::RustType>() as size_t,
             );
         }
@@ -171,10 +183,10 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeIVec3 {
         type RustType = [i32; 3];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
             gs_effect_set_val(
                 param,
-                (&value) as *const _ as *const c_void,
+                value as *const _ as *const c_void,
                 mem::size_of::<Self::RustType>() as size_t,
             );
         }
@@ -188,10 +200,10 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeIVec4 {
         type RustType = [i32; 4];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
             gs_effect_set_val(
                 param,
-                (&value) as *const _ as *const c_void,
+                value as *const _ as *const c_void,
                 mem::size_of::<Self::RustType>() as size_t,
             );
         }
@@ -205,10 +217,10 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeMat4 {
         type RustType = [[f32; 4]; 4];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
             gs_effect_set_val(
                 param,
-                (&value) as *const _ as *const c_void,
+                value as *const _ as *const c_void,
                 mem::size_of::<Self::RustType>() as size_t,
             );
         }
@@ -220,17 +232,18 @@ pub mod shader_param_types {
 
     pub struct ShaderParamTypeTexture;
     impl ShaderParamType for ShaderParamTypeTexture {
-        // TODO
-        type RustType = !;
+        type RustType = Texture;
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: Self::RustType) {
-            // TODO
-            unimplemented!();
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+            gs_effect_set_texture(
+                param,
+                value.inner() as *mut _,
+            )
         }
 
         unsafe fn get_param_value_default<'a>(param: *mut gs_eparam_t) -> &'a Self::RustType {
-            // TODO
-            unimplemented!();
+            // TODO: Consider changing abstractions to remove this panic using type safety
+            panic!("Cannot access the value of a texture effect parameter.");
         }
 
         fn corresponding_enum_variant() -> ShaderParamTypeKind {
@@ -303,16 +316,14 @@ pub struct GraphicsEffect {
 }
 
 impl GraphicsEffect {
-    pub fn from_effect_string(value: &CStr, name: &CStr) -> Option<Self> {
+    pub fn from_effect_string<'a>(value: &CStr, name: &CStr, context: &'a GraphicsContext) -> Option<GraphicsContextDependentEnabled<'a, Self>> {
         unsafe {
-            obs_enter_graphics();
             let raw = gs_effect_create(value.as_ptr(), name.as_ptr(), std::ptr::null_mut());
-            obs_leave_graphics();
 
             if raw.is_null() {
                 None
             } else {
-                Some(Self { raw })
+                Some(ContextDependent::new(Self { raw }, context))
             }
         }
     }
@@ -323,47 +334,49 @@ impl GraphicsEffect {
         }
     }
 
-    pub fn get_param_by_index(
-        &self,
+    pub fn get_param_by_index<'a>(
+        self: &GraphicsContextDependentEnabled<'a, Self>,
         index: usize,
-    ) -> Option<GraphicsEffectParam> {
+    ) -> Option<GraphicsContextDependentEnabled<'a, GraphicsEffectParam>> {
         unsafe {
             let pointer = gs_effect_get_param_by_idx(self.raw, index as size_t);
             if !pointer.is_null() {
-                Some(GraphicsEffectParam::from_raw(pointer))
+                Some(GraphicsEffectParam::from_raw(pointer, self.context()))
             } else {
                 None
             }
         }
     }
 
-    pub fn get_param_by_name(
-        &self,
+    pub fn get_param_by_name<'a>(
+        self: &GraphicsContextDependentEnabled<'a, Self>,
         name: &CStr,
-    ) -> Option<GraphicsEffectParam> {
+    ) -> Option<GraphicsContextDependentEnabled<'a, GraphicsEffectParam>> {
         unsafe {
             let pointer = gs_effect_get_param_by_name(self.raw, name.as_ptr());
             if !pointer.is_null() {
-                Some(GraphicsEffectParam::from_raw(pointer))
+                Some(GraphicsEffectParam::from_raw(pointer, self.context()))
             } else {
                 None
             }
         }
     }
 
-    pub fn params_iter<'a>(&'a self) -> impl Iterator<Item=GraphicsEffectParam> + 'a {
-        struct EffectParamIterator<'a> {
-            effect: &'a GraphicsEffect,
+    pub fn params_iter<'a, 'b>(
+        self: &'b GraphicsContextDependentEnabled<'a, Self>,
+    ) -> impl Iterator<Item=GraphicsContextDependentEnabled<'a, GraphicsEffectParam>> + 'b {
+        struct EffectParamIterator<'a, 'b> {
+            effect: &'b GraphicsContextDependentEnabled<'a, GraphicsEffect>,
             next_index: usize,
             len: usize,
         }
 
-        impl<'a> Iterator for EffectParamIterator<'a> {
-            type Item = GraphicsEffectParam;
+        impl<'a, 'b> Iterator for EffectParamIterator<'a, 'b> {
+            type Item = GraphicsContextDependentEnabled<'a, GraphicsEffectParam>;
 
             fn next(&mut self) -> Option<Self::Item> {
                 if self.next_index < self.len {
-                    let param = self.effect.get_param_by_index(self.next_index)
+                    let param = GraphicsEffect::get_param_by_index(self.effect, self.next_index)
                         .expect("An effect parameter went unexpectedly missing.");
                     self.next_index += 1;
 
@@ -378,7 +391,7 @@ impl GraphicsEffect {
             len: self.get_param_count(),
             effect: self,
             next_index: 0,
-        }
+        } as EffectParamIterator<'a, 'b>
     }
 
     /// # Safety
@@ -391,9 +404,7 @@ impl GraphicsEffect {
 impl Drop for GraphicsEffect {
     fn drop(&mut self) {
         unsafe {
-            obs_enter_graphics();
             gs_effect_destroy(self.raw);
-            obs_leave_graphics();
         }
     }
 }
@@ -408,7 +419,7 @@ impl GraphicsEffectParam {
     /// # Safety
     /// Creates a GraphicsEffectParam from a mutable reference. This data could be modified
     /// somewhere else so this is UB.
-    pub unsafe fn from_raw(raw: *mut gs_eparam_t) -> Self {
+    pub unsafe fn from_raw<'a>(raw: *mut gs_eparam_t, context: &'a GraphicsContext) -> GraphicsContextDependentEnabled<'a, Self> {
         let mut info = gs_effect_param_info::default();
         gs_effect_get_param_info(raw, &mut info);
 
@@ -417,11 +428,14 @@ impl GraphicsEffectParam {
             .into_string()
             .unwrap_or(String::from("{unknown-param-name}"));
 
-        Self {
-            raw,
-            shader_type,
-            name,
-        }
+        ContextDependent::new(
+            Self {
+                raw,
+                shader_type,
+                name,
+            },
+            context,
+        )
     }
 
     pub fn name(&self) -> &str {
@@ -432,12 +446,14 @@ impl GraphicsEffectParam {
         self.shader_type
     }
 
-    pub fn downcast<T: ShaderParamType>(self) -> Option<GraphicsEffectParamTyped<T>> {
+    pub fn downcast<'a, T: ShaderParamType>(self: GraphicsContextDependentEnabled<'a, Self>) -> Option<GraphicsContextDependentEnabled<'a, GraphicsEffectParamTyped<T>>> {
         if self.shader_type == <T as ShaderParamType>::corresponding_enum_variant() {
-            Some(GraphicsEffectParamTyped {
-                inner: self,
-                __marker: Default::default(),
-            })
+            Some(self.map(|inner| {
+                GraphicsEffectParamTyped {
+                    inner,
+                    __marker: Default::default(),
+                }
+            }))
         } else {
             None
         }
@@ -450,13 +466,13 @@ pub struct GraphicsEffectParamTyped<T: ShaderParamType> {
 }
 
 impl<T: ShaderParamType> GraphicsEffectParamTyped<T> {
-    pub fn set_param_value(&mut self, value: <T as ShaderParamType>::RustType) {
+    pub fn set_param_value(&mut self, value: &<T as ShaderParamType>::RustType) {
         unsafe {
             <T as ShaderParamType>::set_param_value(self.inner.raw, value);
         }
     }
 
-    pub fn get_param_value_default<'a>(&'a mut self) -> &'a <T as ShaderParamType>::RustType {
+    pub fn get_param_value_default<'a>(&'a self) -> &'a <T as ShaderParamType>::RustType {
         unsafe {
             <T as ShaderParamType>::get_param_value_default::<'a>(self.inner.raw)
         }
@@ -466,7 +482,7 @@ impl<T: ShaderParamType> GraphicsEffectParamTyped<T> {
 impl GraphicsEffectParamTyped<ShaderParamTypeTexture> {
     pub fn set_next_sampler(
         &mut self,
-        _context: &GraphicsEffectContext,
+        _context: &GraphicsContext,
         value: &mut GraphicsSamplerState,
     ) {
         unsafe {
@@ -540,8 +556,8 @@ pub struct GraphicsSamplerInfo {
 }
 
 impl GraphicsSamplerInfo {
-    pub fn new() -> Self {
-        Self {
+    pub fn new<'a>(context: &'a GraphicsContext) -> GraphicsContextDependentEnabled<'a, Self> {
+        ContextDependent::new(Self {
             info: gs_sampler_info {
                 address_u: GraphicsAddressMode::Clamp.as_raw(),
                 address_v: GraphicsAddressMode::Clamp.as_raw(),
@@ -550,7 +566,7 @@ impl GraphicsSamplerInfo {
                 border_color: 0,
                 filter: GraphicsSampleFilter::Point.as_raw(),
             },
-        }
+        }, context)
     }
 
     pub fn with_address_u(mut self, mode: GraphicsAddressMode) -> Self {
@@ -574,24 +590,21 @@ impl GraphicsSamplerInfo {
     }
 }
 
-impl Default for GraphicsSamplerInfo {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 pub struct GraphicsSamplerState {
     raw: *mut gs_samplerstate_t,
 }
 
-impl From<GraphicsSamplerInfo> for GraphicsSamplerState {
-    fn from(info: GraphicsSamplerInfo) -> GraphicsSamplerState {
+impl<'a> From<GraphicsContextDependentEnabled<'a, GraphicsSamplerInfo>> for GraphicsContextDependentEnabled<'a, GraphicsSamplerState> {
+    fn from(info: GraphicsContextDependentEnabled<'a, GraphicsSamplerInfo>) -> Self {
         unsafe {
-            obs_enter_graphics();
             let raw = gs_samplerstate_create(&info.info);
-            obs_leave_graphics();
 
-            GraphicsSamplerState { raw }
+            ContextDependent::new(
+                GraphicsSamplerState {
+                    raw,
+                },
+                info.context(),
+            )
         }
     }
 }
@@ -599,70 +612,7 @@ impl From<GraphicsSamplerInfo> for GraphicsSamplerState {
 impl Drop for GraphicsSamplerState {
     fn drop(&mut self) {
         unsafe {
-            obs_enter_graphics();
             gs_samplerstate_destroy(self.raw);
-            obs_leave_graphics();
-        }
-    }
-}
-
-pub struct GraphicsEffectContext {}
-
-impl GraphicsEffectContext {
-    /// # Safety
-    /// GraphicsEffectContext has methods that should only be used in certain situations.
-    /// Constructing it at the wrong time could cause UB.
-    pub unsafe fn new() -> Self {
-        Self {}
-    }
-}
-
-impl GraphicsEffectContext {}
-
-pub enum GraphicsColorFormat {
-    UNKNOWN,
-    A8,
-    R8,
-    RGBA,
-    BGRX,
-    BGRA,
-    R10G10B10A2,
-    RGBA16,
-    R16,
-    RGBA16F,
-    RGBA32F,
-    RG16F,
-    RG32F,
-    R16F,
-    R32F,
-    DXT1,
-    DXT3,
-    DXT5,
-    R8G8,
-}
-
-impl GraphicsColorFormat {
-    pub fn as_raw(&self) -> gs_color_format {
-        match self {
-            GraphicsColorFormat::UNKNOWN => gs_color_format_GS_UNKNOWN,
-            GraphicsColorFormat::A8 => gs_color_format_GS_A8,
-            GraphicsColorFormat::R8 => gs_color_format_GS_R8,
-            GraphicsColorFormat::RGBA => gs_color_format_GS_RGBA,
-            GraphicsColorFormat::BGRX => gs_color_format_GS_BGRX,
-            GraphicsColorFormat::BGRA => gs_color_format_GS_BGRA,
-            GraphicsColorFormat::R10G10B10A2 => gs_color_format_GS_R10G10B10A2,
-            GraphicsColorFormat::RGBA16 => gs_color_format_GS_RGBA16,
-            GraphicsColorFormat::R16 => gs_color_format_GS_R16,
-            GraphicsColorFormat::RGBA16F => gs_color_format_GS_RGBA16F,
-            GraphicsColorFormat::RGBA32F => gs_color_format_GS_RGBA32F,
-            GraphicsColorFormat::RG16F => gs_color_format_GS_RG16F,
-            GraphicsColorFormat::RG32F => gs_color_format_GS_RG32F,
-            GraphicsColorFormat::R16F => gs_color_format_GS_R16F,
-            GraphicsColorFormat::R32F => gs_color_format_GS_R32F,
-            GraphicsColorFormat::DXT1 => gs_color_format_GS_DXT1,
-            GraphicsColorFormat::DXT3 => gs_color_format_GS_DXT3,
-            GraphicsColorFormat::DXT5 => gs_color_format_GS_DXT5,
-            GraphicsColorFormat::R8G8 => gs_color_format_GS_R8G8,
         }
     }
 }
@@ -684,6 +634,63 @@ impl GraphicsAllowDirectRendering {
         }
     }
 }
+
+/// A handle to the graphics context.
+pub struct GraphicsContext {
+    inner: *mut graphics_t,
+    drop: bool,
+}
+
+impl Context for GraphicsContext {
+    fn enter_once() -> Option<Self> {
+        unsafe {
+            obs_enter_graphics();
+
+            Self::get_current().map(|mut context| {
+                context.drop = true;
+                context
+            })
+        }
+    }
+
+    /// Certain callbacks will automatically be within the graphics context, such as:
+    /// `obs_source_info.video_render`, the callbacks of `obs_display_add_draw_callback()`
+    /// and `obs_add_main_render_callback()`.
+    ///
+    /// This function is useful to access the context.
+    /// If access to the graphics context is required outside of these callbacks,
+    /// use `Context::enter` to enter the context.
+    fn get_current() -> Option<Self> {
+        unsafe {
+            let inner = gs_get_context();
+
+            if inner == std::ptr::null_mut() {
+                None
+            } else {
+                Some(Self {
+                    inner: gs_get_context(),
+                    drop: false,
+                })
+            }
+        }
+    }
+}
+
+impl GraphicsContext {
+}
+
+impl Drop for GraphicsContext {
+    fn drop(&mut self) {
+        if self.drop {
+            unsafe {
+                obs_leave_graphics();
+            }
+        }
+    }
+}
+
+pub type GraphicsContextDependentEnabled<'a, T> = ContextDependent<T, GraphicsContext, Enabled<'a, GraphicsContext>>;
+pub type GraphicsContextDependentDisabled<T> = ContextDependent<T, GraphicsContext, Disabled>;
 
 macro_rules! vector_impls {
     ($($rust_name: ident, $name:ident => $($component:ident)*,)*) => (
