@@ -211,8 +211,8 @@ impl VideoRenderSource<Data> for ScrollFocusFilter {
                 ColorFormatKind::RGBA,
                 GraphicsAllowDirectRendering::NoDirectRendering,
                 |context, _effect| {
-                    param_add.set_param_value(current);
-                    param_mul.set_param_value(&[zoom, zoom]);
+                    param_add.set_param_value(current, &context);
+                    param_mul.set_param_value(&[zoom, zoom], &context);
                     image.set_next_sampler(context, sampler);
                 },
             );

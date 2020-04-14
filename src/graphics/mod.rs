@@ -70,7 +70,10 @@ pub mod shader_param_types {
         type RustType: Debug;
 
         /// May only be called in a graphics context.
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType);
+        ///
+        /// TODO: We probably don't want to use FilterContext directly, but rather a different
+        /// container to store our reference counts in.
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType, context: &FilterContext);
 
         /// May only be called in a graphics context.
         unsafe fn get_param_value_default<'a>(param: *mut gs_eparam_t) -> &'a Self::RustType {
@@ -88,7 +91,7 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeBool {
         type RustType = bool;
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType, context: &FilterContext) {
             gs_effect_set_bool(param, *value);
         }
 
@@ -101,7 +104,7 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeFloat {
         type RustType = f32;
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType, context: &FilterContext) {
             gs_effect_set_float(param, *value);
         }
 
@@ -114,7 +117,7 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeInt {
         type RustType = i32;
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType, context: &FilterContext) {
             gs_effect_set_int(param, *value);
         }
 
@@ -127,7 +130,7 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeVec2 {
         type RustType = [f32; 2];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType, context: &FilterContext) {
             let mut value = Vec2::new(value[0], value[1]);
             gs_effect_set_vec2(param, value.as_ptr());
         }
@@ -141,7 +144,7 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeVec3 {
         type RustType = [f32; 3];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType, context: &FilterContext) {
             let mut value = Vec3::new(value[0], value[1], value[2]);
             gs_effect_set_vec3(param, value.as_ptr());
         }
@@ -155,7 +158,7 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeVec4 {
         type RustType = [f32; 4];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType, context: &FilterContext) {
             let mut value = Vec4::new(value[0], value[1], value[2], value[3]);
             gs_effect_set_vec4(param, value.as_ptr());
         }
@@ -169,7 +172,7 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeIVec2 {
         type RustType = [i32; 2];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType, context: &FilterContext) {
             gs_effect_set_val(
                 param,
                 value as *const _ as *const c_void,
@@ -186,7 +189,7 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeIVec3 {
         type RustType = [i32; 3];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType, context: &FilterContext) {
             gs_effect_set_val(
                 param,
                 value as *const _ as *const c_void,
@@ -203,7 +206,7 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeIVec4 {
         type RustType = [i32; 4];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType, context: &FilterContext) {
             gs_effect_set_val(
                 param,
                 value as *const _ as *const c_void,
@@ -220,7 +223,7 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeMat4 {
         type RustType = [[f32; 4]; 4];
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType, context: &FilterContext) {
             gs_effect_set_val(
                 param,
                 value as *const _ as *const c_void,
@@ -237,7 +240,8 @@ pub mod shader_param_types {
     impl ShaderParamType for ShaderParamTypeTexture {
         type RustType = Texture;
 
-        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
+        unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType, context: &FilterContext) {
+            context.mark_texture_as_used(value);
             gs_effect_set_texture(
                 param,
                 value.inner() as *mut gs_texture_t,
@@ -469,9 +473,9 @@ pub struct GraphicsEffectParamTyped<T: ShaderParamType> {
 }
 
 impl<T: ShaderParamType> GraphicsEffectParamTyped<T> {
-    pub fn set_param_value(&mut self, value: &<T as ShaderParamType>::RustType) {
+    pub fn set_param_value(&mut self, value: &<T as ShaderParamType>::RustType, context: &FilterContext) {
         unsafe {
-            <T as ShaderParamType>::set_param_value(self.inner.raw, value);
+            <T as ShaderParamType>::set_param_value(self.inner.raw, value, context);
         }
     }
 

@@ -1,3 +1,5 @@
+use std::ops::Deref;
+use std::sync::Arc;
 use std::ffi::{c_void, CString};
 use std::path::Path;
 use crate::context::*;
@@ -124,13 +126,50 @@ pub const TEXTURE_FLAG_DUP_BUFFER: u32 = GS_DUP_BUFFER;
 pub const TEXTURE_FLAG_SHARED_TEX: u32 = GS_SHARED_TEX;
 pub const TEXTURE_FLAG_SHARED_KM_TEX: u32 = GS_SHARED_KM_TEX;
 
+/// Implements the destructor for reference counted, owned textures.
+#[derive(Debug)]
+pub struct TextureOwned(*mut gs_texture_t);
+
+impl Drop for TextureOwned {
+    fn drop(&mut self) {
+        unsafe {
+            gs_texture_destroy(self.0);
+        }
+    }
+}
+
+impl Deref for TextureOwned {
+    type Target = *mut gs_texture_t;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Debug)]
+enum TextureInner {
+    Owned(Arc<TextureOwned>),
+    Borrowed(*mut gs_texture_t),
+}
+
+impl Deref for TextureInner {
+    type Target = *mut gs_texture_t;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Owned(ref arc) => &*arc,
+            Self::Borrowed(ref ptr) => &ptr,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Texture {
-    inner: *mut gs_texture_t,
+    inner: TextureInner,
     flags: u32,
 }
 
-impl<'a> Clone for FilterContextDependentEnabled<'a, Texture> {
+impl<'a> Clone for GraphicsContextDependentEnabled<'a, Texture> {
     fn clone(&self) -> Self {
         let dimensions = self.get_dimensions();
         let color_format = self.get_color_format();
@@ -147,8 +186,8 @@ impl<'a> Clone for FilterContextDependentEnabled<'a, Texture> {
 unsafe impl Send for Texture {}
 unsafe impl Sync for Texture {}
 
-impl DefaultInContext<FilterContext> for Texture {
-    fn default_in_context<'a>(context: &'a FilterContext) -> FilterContextDependentEnabled<Self> {
+impl DefaultInContext<GraphicsContext> for Texture {
+    fn default_in_context<'a>(context: &'a GraphicsContext) -> GraphicsContextDependentEnabled<Self> {
         Self::new_dummy(context)
     }
 }
@@ -156,12 +195,12 @@ impl DefaultInContext<FilterContext> for Texture {
 impl Texture {
     pub unsafe fn from_raw(raw: *mut gs_texture_t, flags: u32) -> Self {
         Self {
-            inner: raw,
+            inner: TextureInner::Borrowed(raw),
             flags,
         }
     }
 
-    pub fn new_dummy(context: &FilterContext) -> FilterContextDependentEnabled<Self> {
+    pub fn new_dummy(context: &GraphicsContext) -> GraphicsContextDependentEnabled<Self> {
         let dimensions = [1, 1];
         let color_format = ColorFormatKind::RGBA;
         let bytes = dimensions[0] * dimensions[1] * color_format.get_pixel_size_in_bytes();
@@ -171,22 +210,20 @@ impl Texture {
     }
 
     /// For flags, see constants defined in this module
-    pub fn new<'a>(dimensions: [usize; 2], color_format: ColorFormatKind, levels: &[&[u8]], flags: u32, context: &'a FilterContext) -> FilterContextDependentEnabled<'a, Self> {
-        // FIXME Add data size checks
-        unsafe {
-            let mut level_ptrs = levels.iter().map(|level_ref| {
-                context.store_until_end_of_processing(level_ref) as usize
-            }).collect::<Vec<_>>();
-            let level_ptrs_ptr = context.store_until_end_of_processing(
-                safe_transmute::transmute_to_bytes(&mut level_ptrs),
-            ) as *mut u8;
+    pub fn new<'a>(dimensions: [usize; 2], color_format: ColorFormatKind, levels: &[&[u8]], flags: u32, context: &'a GraphicsContext) -> GraphicsContextDependentEnabled<'a, Self> {
+        let mut level_ptrs = levels.iter().map(|level_ref| {
+            level_ref.as_ptr()
+        }).collect::<Vec<_>>();
 
+        // FIXME Add data size checks
+
+        unsafe {
             let inner = gs_texture_create(
                 dimensions[0] as u32,
                 dimensions[1] as u32,
                 color_format.into_raw(),
                 levels.len() as u32,
-                level_ptrs_ptr as *mut _,
+                level_ptrs.as_mut_ptr(),
                 flags,
             );
 
@@ -195,7 +232,10 @@ impl Texture {
             }
 
             ContextDependent::new(
-                Self::from_raw(inner, flags),
+                Self {
+                    inner: TextureInner::Owned(Arc::new(TextureOwned(inner))),
+                    flags,
+                },
                 context,
             )
         }
@@ -211,7 +251,10 @@ impl Texture {
             if inner == std::ptr::null_mut() {
                 None
             } else {
-                Some(Self::from_raw(inner, 0))
+                Some(Self {
+                    inner: TextureInner::Owned(Arc::new(TextureOwned(inner))),
+                    flags: 0,
+                })
             }
         }
     }
@@ -219,47 +262,48 @@ impl Texture {
     pub fn get_dimensions(&self) -> [usize; 2] {
         unsafe {
             [
-                gs_texture_get_width(self.inner) as usize,
-                gs_texture_get_height(self.inner) as usize,
+                gs_texture_get_width(*self.inner) as usize,
+                gs_texture_get_height(*self.inner) as usize,
             ]
         }
     }
 
     pub fn get_color_format(&self) -> ColorFormatKind {
         unsafe {
-            ColorFormatKind::from_raw(gs_texture_get_color_format(self.inner))
+            ColorFormatKind::from_raw(gs_texture_get_color_format(*self.inner))
         }
     }
 
     pub fn get_interface_specific_object(&mut self) -> *mut c_void {
         unsafe {
-            gs_texture_get_obj(self.inner)
+            gs_texture_get_obj(*self.inner)
         }
     }
 
     pub fn inner(&self) -> *const gs_texture_t {
-        self.inner as *const _
+        *self.inner as *const _
     }
 
     pub fn inner_mut(&mut self) -> *mut gs_texture_t {
-        self.inner
+        *self.inner
     }
 
     pub fn copy_to(&self, dst: &mut Texture) {
         unsafe {
-            gs_copy_texture(dst.inner, self.inner)
+            gs_copy_texture(*dst.inner, *self.inner)
+        }
+    }
+
+    /// Used to prolong the lifetime of the texture, by holding onto its reference.
+    pub unsafe fn clone_owned_reference(&self) -> Option<Arc<TextureOwned>> {
+        if let TextureInner::Owned(ref arc) = &self.inner {
+            Some(arc.clone())
+        } else {
+            None
         }
     }
 
     // TODO:
     // pub fn gs_copy_texture(dst: *mut gs_texture_t, src: *mut gs_texture_t);
     // pub fn gs_copy_texture_region(
-}
-
-impl Drop for Texture {
-    fn drop(&mut self) {
-        unsafe {
-            gs_texture_destroy(self.inner);
-        }
-    }
 }
