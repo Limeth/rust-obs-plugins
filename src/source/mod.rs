@@ -22,7 +22,7 @@ use obs_sys::{
 
 use super::{
     graphics::{
-        GraphicsAllowDirectRendering, ColorFormatKind, GraphicsEffect, GraphicsContext,
+        GraphicsAllowDirectRendering, ColorFormatKind, GraphicsEffect, GraphicsContext, FilterContext,
     },
 };
 
@@ -109,7 +109,7 @@ impl SourceContext {
     /// See [OBS documentation](https://obsproject.com/docs/reference-sources.html#c.obs_source_process_filter_begin)
     ///
     /// Note: only works with sources that are filters.
-    pub fn process_filter<F: FnOnce(&mut GraphicsContext, &mut GraphicsEffect)>(
+    pub fn process_filter<F: FnOnce(&mut FilterContext, &mut GraphicsEffect)>(
         &mut self,
         effect: &mut GraphicsEffect,
         (cx, cy): (u32, u32),
@@ -122,7 +122,7 @@ impl SourceContext {
                 SourceType::from_native(obs_source_get_type(self.source))
             {
                 if obs_source_process_filter_begin(self.source, format.into_raw(), direct.as_raw()) {
-                    let mut context = GraphicsContext::enter().unwrap();
+                    let mut context = FilterContext::enter().unwrap();
                     func(&mut context, effect);
                     obs_source_process_filter_end(self.source, effect.as_ptr(), cx, cy);
                 }

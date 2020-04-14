@@ -57,8 +57,10 @@ use paste::item;
 use cstr::cstr;
 use crate::context::*;
 
+mod context;
 mod texture;
 
+pub use context::*;
 pub use texture::*;
 
 pub mod shader_param_types {
@@ -483,7 +485,7 @@ impl<T: ShaderParamType> GraphicsEffectParamTyped<T> {
 impl GraphicsEffectParamTyped<ShaderParamTypeTexture> {
     pub fn set_next_sampler(
         &mut self,
-        _context: &GraphicsContext,
+        _context: &FilterContext,
         value: &mut GraphicsSamplerState,
     ) {
         unsafe {
@@ -635,67 +637,6 @@ impl GraphicsAllowDirectRendering {
         }
     }
 }
-
-/// A handle to the graphics context.
-pub struct GraphicsContext {
-    inner: *mut graphics_t,
-    drop: bool,
-}
-
-impl Context for GraphicsContext {
-    fn enter_once() -> Option<Self> {
-        if Self::get_current().is_some() {
-            return None;
-        }
-
-        unsafe {
-            obs_enter_graphics();
-
-            Self::get_current().map(|mut context| {
-                context.drop = true;
-                context
-            })
-        }
-    }
-
-    /// Certain callbacks will automatically be within the graphics context, such as:
-    /// `obs_source_info.video_render`, the callbacks of `obs_display_add_draw_callback()`
-    /// and `obs_add_main_render_callback()`.
-    ///
-    /// This function is useful to access the context.
-    /// If access to the graphics context is required outside of these callbacks,
-    /// use `Context::enter` to enter the context.
-    fn get_current() -> Option<Self> {
-        unsafe {
-            let inner = gs_get_context();
-
-            if inner == std::ptr::null_mut() {
-                None
-            } else {
-                Some(Self {
-                    inner,
-                    drop: false,
-                })
-            }
-        }
-    }
-}
-
-impl GraphicsContext {
-}
-
-impl Drop for GraphicsContext {
-    fn drop(&mut self) {
-        if self.drop {
-            unsafe {
-                obs_leave_graphics();
-            }
-        }
-    }
-}
-
-pub type GraphicsContextDependentEnabled<'a, T> = ContextDependent<T, GraphicsContext, Enabled<'a, GraphicsContext>>;
-pub type GraphicsContextDependentDisabled<T> = ContextDependent<T, GraphicsContext, Disabled>;
 
 macro_rules! vector_impls {
     ($($rust_name: ident, $name:ident => $($component:ident)*,)*) => (

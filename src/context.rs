@@ -272,3 +272,13 @@ impl<T: Default, C: Context> DefaultInContext<C> for T {
         ContextDependent::new(T::default(), context)
     }
 }
+
+pub trait ContextCarrier<C: Context> {
+    fn context(&self) -> &C;
+}
+
+impl<C: Context> ContextCarrier<C> for C {
+    fn context(&self) -> &C {
+        self
+    }
+}

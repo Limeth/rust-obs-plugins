@@ -130,7 +130,7 @@ pub struct Texture {
     flags: u32,
 }
 
-impl<'a> Clone for GraphicsContextDependentEnabled<'a, Texture> {
+impl<'a> Clone for FilterContextDependentEnabled<'a, Texture> {
     fn clone(&self) -> Self {
         let dimensions = self.get_dimensions();
         let color_format = self.get_color_format();
@@ -147,8 +147,8 @@ impl<'a> Clone for GraphicsContextDependentEnabled<'a, Texture> {
 unsafe impl Send for Texture {}
 unsafe impl Sync for Texture {}
 
-impl DefaultInContext<GraphicsContext> for Texture {
-    fn default_in_context<'a>(context: &'a GraphicsContext) -> GraphicsContextDependentEnabled<Self> {
+impl DefaultInContext<FilterContext> for Texture {
+    fn default_in_context<'a>(context: &'a FilterContext) -> FilterContextDependentEnabled<Self> {
         Self::new_dummy(context)
     }
 }
@@ -161,7 +161,7 @@ impl Texture {
         }
     }
 
-    pub fn new_dummy(context: &GraphicsContext) -> GraphicsContextDependentEnabled<Self> {
+    pub fn new_dummy(context: &FilterContext) -> FilterContextDependentEnabled<Self> {
         let dimensions = [1, 1];
         let color_format = ColorFormatKind::RGBA;
         let bytes = dimensions[0] * dimensions[1] * color_format.get_pixel_size_in_bytes();
@@ -171,20 +171,22 @@ impl Texture {
     }
 
     /// For flags, see constants defined in this module
-    pub fn new<'a>(dimensions: [usize; 2], color_format: ColorFormatKind, levels: &[&[u8]], flags: u32, context: &'a GraphicsContext) -> GraphicsContextDependentEnabled<'a, Self> {
-        let mut level_ptrs = levels.iter().map(|level_ref| {
-            level_ref.as_ptr()
-        }).collect::<Vec<_>>();
-
+    pub fn new<'a>(dimensions: [usize; 2], color_format: ColorFormatKind, levels: &[&[u8]], flags: u32, context: &'a FilterContext) -> FilterContextDependentEnabled<'a, Self> {
         // FIXME Add data size checks
-
         unsafe {
+            let mut level_ptrs = levels.iter().map(|level_ref| {
+                context.store_until_end_of_processing(level_ref) as usize
+            }).collect::<Vec<_>>();
+            let level_ptrs_ptr = context.store_until_end_of_processing(
+                safe_transmute::transmute_to_bytes(&mut level_ptrs),
+            ) as *mut u8;
+
             let inner = gs_texture_create(
                 dimensions[0] as u32,
                 dimensions[1] as u32,
                 color_format.into_raw(),
                 levels.len() as u32,
-                level_ptrs.as_mut_ptr(),
+                level_ptrs_ptr as *mut _,
                 flags,
             );
 
