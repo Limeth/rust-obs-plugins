@@ -119,8 +119,12 @@
 pub use obs_sys;
 pub use cstr::*;
 
+/// Utilities
+pub mod util;
 /// Context abstractions
 pub mod context;
+/// Globally accessible info
+pub mod info;
 /// Tools required for manipulating graphics in OBS
 pub mod graphics;
 /// Methods for logging to OBS console

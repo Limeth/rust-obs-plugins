@@ -25,6 +25,7 @@ use obs_sys::{
 use std::ptr::null_mut;
 use std::os::raw::c_void;
 use std::ffi::CStr;
+use crate::util::*;
 
 type size_t = ::std::os::raw::c_ulong;
 
@@ -52,7 +53,7 @@ impl Drop for AudioOutput {
 }
 
 pub struct SampleIterator<'a, T: AudioFormat> {
-    audio_data: &'a AudioDataTyped<'a, T>,
+    audio_data: AudioData<'a, T>,
     next_frame: usize,
     // All following values in bytes
     plane: usize,
@@ -61,8 +62,8 @@ pub struct SampleIterator<'a, T: AudioFormat> {
 }
 
 impl<'a, T: AudioFormat> SampleIterator<'a, T> {
-    pub fn new(audio_data: &'a AudioDataTyped<'a, T>, channel: usize) -> Option<Self> {
-        let info = &audio_data.inner.info;
+    pub fn new(audio_data: &AudioData<'a, T>, channel: usize) -> Option<Self> {
+        let info = &audio_data.info;
         let format = info.format();
         let plane = if format.is_planar() {
             channel
@@ -70,7 +71,7 @@ impl<'a, T: AudioFormat> SampleIterator<'a, T> {
             0
         };
 
-        let data = unsafe { &*audio_data.inner.inner };
+        let data = unsafe { &*audio_data.inner };
 
         if data.data[plane] == std::ptr::null_mut() {
             return None;
@@ -85,7 +86,7 @@ impl<'a, T: AudioFormat> SampleIterator<'a, T> {
                 format.get_bytes_per_sample() * channel
             },
             stride: info.get_sample_stride(),
-            audio_data,
+            audio_data: audio_data.clone(),
         })
     }
 }
@@ -94,12 +95,12 @@ impl<'a, T: AudioFormat> Iterator for SampleIterator<'a, T> {
     type Item = T::SampleType;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.next_frame >= self.audio_data.inner.frames() as usize {
+        if self.next_frame >= self.audio_data.frames() as usize {
             return None;
         }
 
         let sample = unsafe {
-            let audio_data = &*self.audio_data.inner.inner;
+            let audio_data = &*self.audio_data.inner;
             let plane_data = audio_data.data[self.plane];
             let sample_ptr: *mut u8 = plane_data.offset((self.offset + self.stride * self.next_frame) as isize);
             let sample_ptr: *mut T::SampleType = sample_ptr as *mut _;
@@ -115,50 +116,66 @@ impl<'a, T: AudioFormat> Iterator for SampleIterator<'a, T> {
 
 impl<'a, T: AudioFormat> ExactSizeIterator for SampleIterator<'a, T> {
     fn len(&self) -> usize {
-        self.audio_data.inner.frames() as usize
+        self.audio_data.frames() as usize
     }
 }
 
-pub struct AudioDataTyped<'a, T: AudioFormat> {
-    pub inner: AudioData<'a>,
-    __marker: std::marker::PhantomData<T>,
-}
-
-impl<'a, T: AudioFormat> AudioDataTyped<'a, T> {
+impl<'a, T: AudioFormat> AudioData<'a, T> {
     /// For some reason, the reported speaker layout is incorrect and access
     /// to channels out of (real) bounds causes undefined behaviour, such as
     /// crashes.
-    pub fn samples<'b>(&'b self, channel: usize)
-        -> Option<impl Iterator<Item=T::SampleType> + ExactSizeIterator + 'b> {
-        if channel < self.inner.info.speaker_layout().get_channel_count() {
+    pub fn samples(&self, channel: usize)
+        -> Option<impl Iterator<Item=T::SampleType> + ExactSizeIterator + 'a> {
+        if channel < self.info.speaker_layout().get_channel_count() {
             SampleIterator::new(self, channel)
         } else {
             None
         }
     }
 
-    pub fn channels<'b>(&'b self) -> impl Iterator<Item=usize> + 'b {
-        (0..(self.inner.info.speaker_layout().get_channel_count())).into_iter()
+    pub fn samples_normalized(&self, channel: usize)
+        -> Option<impl Iterator<Item=f32> + ExactSizeIterator + 'a> {
+        self.samples(channel).map(|samples| {
+            samples.map(|sample| <T as AudioFormat>::normalize_sample(sample))
+        })
     }
 }
 
-pub struct AudioData<'a> {
-    inner: *mut audio_data,
-    info: AudioOutputInfo,
-    __marker: std::marker::PhantomData<&'a ()>,
+/// A shared reference to audio data.
+/// This type can be in two forms; `AudioData<()>` and `AudioData<T> where T: AudioFormat`.
+pub struct AudioData<'a, T> {
+    inner: *const audio_data,
+    info: &'a AudioOutputInfo,
+    __marker: std::marker::PhantomData<T>,
 }
 
-impl<'a> AudioData<'a> {
-    pub unsafe fn from_raw(inner: *mut audio_data) -> Self {
+impl<'a, T> Clone for AudioData<'a, T> {
+    fn clone(&self) -> Self {
         Self {
-            inner,
-            info: Audio::get().get_output_info(),
+            inner: self.inner,
+            info: self.info,
             __marker: Default::default(),
         }
     }
+}
 
+impl<'a, T> AudioData<'a, T> {
     pub fn info(&self) -> &AudioOutputInfo {
         &self.info
+    }
+
+    pub fn sample_bytes(&self, channel: usize) -> &[u8] {
+        let len = self.info.format().get_bytes_per_sample() * self.frames() as usize;
+
+        unsafe {
+            let inner = &*self.inner;
+
+            std::slice::from_raw_parts(inner.data[channel], len)
+        }
+    }
+
+    pub fn channels(&self) -> impl Iterator<Item=usize> {
+        (0..(self.info.speaker_layout().get_channel_count())).into_iter()
     }
 
     pub fn frames(&self) -> u32 {
@@ -177,16 +194,61 @@ impl<'a> AudioData<'a> {
         }
     }
 
-    pub fn downcast<T: AudioFormat>(self) -> Option<AudioDataTyped<'a, T>> {
+    pub fn upcast(self) -> AudioData<'a, ()> {
+        AudioData {
+            inner: self.inner,
+            info: self.info,
+            __marker: Default::default(),
+        }
+    }
+}
+
+impl<'a> AudioData<'a, ()> {
+    pub unsafe fn from_raw(inner: *const audio_data, info: &'a AudioOutputInfo) -> Self {
+        Self {
+            inner,
+            info,
+            __marker: Default::default(),
+        }
+    }
+
+    pub fn downcast<T: AudioFormat>(self) -> Option<AudioData<'a, T>> {
         let info = Audio::get().get_output_info();
 
         if info.format() == T::KIND {
-            Some(AudioDataTyped {
-                inner: self,
+            Some(AudioData {
+                inner: self.inner,
+                info: self.info,
                 __marker: Default::default(),
             })
         } else {
             None
+        }
+    }
+
+    pub fn samples_normalized(&self, channel: usize) -> Option<Box<dyn IteratorExactSizeIterator<f32> + 'a>> {
+        use AudioFormatKind::*;
+
+        macro_rules! match_arm {
+            ($audio_format_ty:ty) => {
+                paste::expr! {
+                    self.clone().downcast::<[< AudioFormat $audio_format_ty >]>()
+                        .unwrap().samples_normalized(channel)
+                        .map(|iterator| Box::new(iterator) as Box<dyn IteratorExactSizeIterator<f32> + 'a>)
+                }
+            }
+        }
+
+        match self.info.format() {
+            InterleavedU8 => match_arm!(InterleavedU8),
+            InterleavedI16 => match_arm!(InterleavedI16),
+            InterleavedI32 => match_arm!(InterleavedI32),
+            InterleavedF32 => match_arm!(InterleavedF32),
+            PlanarU8 => match_arm!(PlanarU8),
+            PlanarI16 => match_arm!(PlanarI16),
+            PlanarI32 => match_arm!(PlanarI32),
+            PlanarF32 => match_arm!(PlanarF32),
+            Unknown => None,
         }
     }
 }
@@ -194,12 +256,15 @@ impl<'a> AudioData<'a> {
 macro_rules! define_audio_format_types {
     {
         $(
-            $binding:ident, $name:ident, $interleaved:expr, $sample_type:ty
+            $binding:ident, $name:ident, $interleaved:expr, $sample_type:ty, { $($convert:tt)* }
         );*$(;)?
     } => {
-        pub trait AudioFormat {
+        pub trait AudioFormat: 'static {
             type SampleType: Copy;
             const KIND: AudioFormatKind;
+
+            /// Converts the sample to a normalized range 
+            fn normalize_sample(sample: Self::SampleType) -> f32;
         }
 
         $(
@@ -209,6 +274,11 @@ macro_rules! define_audio_format_types {
                 impl AudioFormat for [< AudioFormat $name >] {
                     type SampleType = $sample_type;
                     const KIND: AudioFormatKind = AudioFormatKind::$name;
+
+                    #[inline(always)]
+                    fn normalize_sample(sample: Self::SampleType) -> f32 {
+                        ($($convert)*)(sample)
+                    }
                 }
             }
         )*
@@ -271,15 +341,16 @@ macro_rules! define_audio_format_types {
     }
 }
 
+// TODO: Check these sample conversions. There might be off-by-one errors.
 define_audio_format_types! {
-    audio_format_AUDIO_FORMAT_U8BIT,        InterleavedU8,  false, u8;
-    audio_format_AUDIO_FORMAT_16BIT,        InterleavedI16, false, i16;
-    audio_format_AUDIO_FORMAT_32BIT,        InterleavedI32, false, i32;
-    audio_format_AUDIO_FORMAT_FLOAT,        InterleavedF32, false, f32;
-    audio_format_AUDIO_FORMAT_U8BIT_PLANAR, PlanarU8,       true,  u8;
-    audio_format_AUDIO_FORMAT_16BIT_PLANAR, PlanarI16,      true,  i16;
-    audio_format_AUDIO_FORMAT_32BIT_PLANAR, PlanarI32,      true,  i32;
-    audio_format_AUDIO_FORMAT_FLOAT_PLANAR, PlanarF32,      true,  f32;
+    audio_format_AUDIO_FORMAT_U8BIT,        InterleavedU8,  false, u8,  { |sample| (sample as i16 - (std::u8::MAX / 2) as i16) as f32 / (std::u8::MAX / 2) as f32 };
+    audio_format_AUDIO_FORMAT_16BIT,        InterleavedI16, false, i16, { |sample| (sample as f32 / std::i16::MAX as f32) };
+    audio_format_AUDIO_FORMAT_32BIT,        InterleavedI32, false, i32, { |sample| (sample as f64 / std::i32::MAX as f64) as f32 };
+    audio_format_AUDIO_FORMAT_FLOAT,        InterleavedF32, false, f32, { |sample| sample };
+    audio_format_AUDIO_FORMAT_U8BIT_PLANAR, PlanarU8,       true,  u8,  { |sample| (sample as i16 - (std::u8::MAX / 2) as i16) as f32 / (std::u8::MAX / 2) as f32 };
+    audio_format_AUDIO_FORMAT_16BIT_PLANAR, PlanarI16,      true,  i16, { |sample| (sample as f32 / std::i16::MAX as f32) };
+    audio_format_AUDIO_FORMAT_32BIT_PLANAR, PlanarI32,      true,  i32, { |sample| (sample as f64 / std::i32::MAX as f64) as f32 };
+    audio_format_AUDIO_FORMAT_FLOAT_PLANAR, PlanarF32,      true,  f32, { |sample| sample };
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -403,7 +474,7 @@ impl AudioOutputInfo {
     }
 }
 
-pub type AudioOutputCallback = Box<dyn Fn(AudioData)>;
+pub type AudioOutputCallback = Box<dyn Fn(AudioData<()>)>;
 
 pub struct Audio {
     inner: *mut audio_t,
@@ -480,7 +551,8 @@ unsafe extern "C" fn global_audio_output_callback(
     data: *mut audio_data,
 ) {
     let callback: Box<AudioOutputCallback> = Box::from_raw(param as *mut _);
-    let data = AudioData::from_raw(data);
+    let audio_info = Audio::get().get_output_info();
+    let data = AudioData::from_raw(data, &audio_info);
 
     (callback)(data);
 
