@@ -37,6 +37,7 @@ use obs_sys::{
     gs_shader_param_type_GS_SHADER_PARAM_VEC3, gs_shader_param_type_GS_SHADER_PARAM_VEC4,
     obs_allow_direct_render, obs_allow_direct_render_OBS_ALLOW_DIRECT_RENDERING,
     obs_allow_direct_render_OBS_NO_DIRECT_RENDERING, obs_enter_graphics, obs_leave_graphics, vec2,
+    gs_texture_t,
     gs_effect_get_num_params,
     gs_effect_get_param_by_idx,
     gs_effect_get_default_val_size,
@@ -237,8 +238,8 @@ pub mod shader_param_types {
         unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType) {
             gs_effect_set_texture(
                 param,
-                value.inner() as *mut _,
-            )
+                value.inner() as *mut gs_texture_t,
+            );
         }
 
         unsafe fn get_param_value_default<'a>(param: *mut gs_eparam_t) -> &'a Self::RustType {
@@ -643,6 +644,10 @@ pub struct GraphicsContext {
 
 impl Context for GraphicsContext {
     fn enter_once() -> Option<Self> {
+        if Self::get_current().is_some() {
+            return None;
+        }
+
         unsafe {
             obs_enter_graphics();
 
@@ -668,7 +673,7 @@ impl Context for GraphicsContext {
                 None
             } else {
                 Some(Self {
-                    inner: gs_get_context(),
+                    inner,
                     drop: false,
                 })
             }
