@@ -75,13 +75,16 @@ pub mod shader_param_types {
         /// container to store our reference counts in.
         unsafe fn set_param_value(param: *mut gs_eparam_t, value: &Self::RustType, context: &FilterContext);
 
-        /// May only be called in a graphics context.
-        unsafe fn get_param_value_default<'a>(param: *mut gs_eparam_t) -> &'a Self::RustType {
+        unsafe fn get_param_value_default<'a>(param: *mut gs_eparam_t) -> Option<&'a Self::RustType> {
             // This test does not seem to be passing, but the values seem to be right.
             // assert_eq!(gs_effect_get_default_val_size(param) as usize, std::mem::size_of::<Self::RustType>());
             let ptr = gs_effect_get_default_val(param);
 
-            &*(ptr as *const Self::RustType)
+            if ptr == std::ptr::null_mut() {
+                None
+            } else {
+                Some(&*(ptr as *const Self::RustType))
+            }
         }
 
         fn corresponding_enum_variant() -> ShaderParamTypeKind;
@@ -248,9 +251,8 @@ pub mod shader_param_types {
             );
         }
 
-        unsafe fn get_param_value_default<'a>(param: *mut gs_eparam_t) -> &'a Self::RustType {
-            // TODO: Consider changing abstractions to remove this panic using type safety
-            panic!("Cannot access the value of a texture effect parameter.");
+        unsafe fn get_param_value_default<'a>(param: *mut gs_eparam_t) -> Option<&'a Self::RustType> {
+            None
         }
 
         fn corresponding_enum_variant() -> ShaderParamTypeKind {
@@ -479,7 +481,7 @@ impl<T: ShaderParamType> GraphicsEffectParamTyped<T> {
         }
     }
 
-    pub fn get_param_value_default<'a>(&'a self) -> &'a <T as ShaderParamType>::RustType {
+    pub fn get_param_value_default<'a>(&'a self) -> Option<&'a <T as ShaderParamType>::RustType> {
         unsafe {
             <T as ShaderParamType>::get_param_value_default::<'a>(self.inner.raw)
         }

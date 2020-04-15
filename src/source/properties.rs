@@ -7,7 +7,7 @@ use obs_sys::{
     obs_data_get_bool, obs_data_get_double, obs_data_get_int, obs_data_get_json, obs_data_get_string,
     obs_data_set_bool, obs_data_set_double, obs_data_set_int, obs_data_set_string,
     obs_data_set_default_bool, obs_data_set_default_double, obs_data_set_default_int, obs_data_set_default_string,
-    obs_properties_add_float, obs_properties_add_float_slider, obs_properties_add_int, obs_properties_add_int_slider, obs_properties_add_bool, obs_properties_add_text, obs_properties_add_path,
+    obs_properties_add_float, obs_properties_add_float_slider, obs_properties_add_int, obs_properties_add_int_slider, obs_properties_add_bool, obs_properties_add_text, obs_properties_add_path, obs_properties_add_color,
     obs_properties_add_button2,
 };
 use std::sync::Arc;
@@ -317,6 +317,61 @@ pub mod property_descriptors {
                 Some(button_callback_global),
                 callback_ptr as *mut _,
             )
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct PropertyDescriptorSpecializationColor;
+
+    /// As defined in vec4.h:
+    /// static inline void vec4_from_rgba(struct vec4 *dst, uint32_t rgba)
+    fn vec4_from_rgba(mut rgba: u32) -> [f32; 4] {
+        let x = ((rgba & u8::MAX as u32) as f32 / u8::MAX as f32) as f32;
+        rgba >>= 8;
+        let y = ((rgba & u8::MAX as u32) as f32 / u8::MAX as f32) as f32;
+        rgba >>= 8;
+        let z = ((rgba & u8::MAX as u32) as f32 / u8::MAX as f32) as f32;
+        rgba >>= 8;
+        let w = ((rgba & u8::MAX as u32) as f32 / u8::MAX as f32) as f32;
+        [x, y, z, w]
+    }
+
+    /// As defined in vec4.h:
+    /// static inline uint32_t vec4_to_rgba(const struct vec4 *src)
+    fn vec4_to_rgba(src: [f32; 4]) -> u32 {
+        let mut val = 0;
+        val |= ((src[0] as f32 * u8::MAX as f32) as u32) << 0;
+        val |= ((src[1] as f32 * u8::MAX as f32) as u32) << 8;
+        val |= ((src[2] as f32 * u8::MAX as f32) as u32) << 16;
+        val |= ((src[3] as f32 * u8::MAX as f32) as u32) << 24;
+        val
+    }
+
+    impl PropertyDescriptorSpecialization for PropertyDescriptorSpecializationColor {
+        unsafe fn create_property(
+            &self,
+            name: *const c_char,
+            description: *const c_char,
+            properties: *mut obs_properties_t,
+        ) -> *mut obs_property_t {
+            obs_properties_add_color(
+                properties,
+                name,
+                description,
+            )
+        }
+    }
+
+    impl ValuePropertyDescriptorSpecialization for PropertyDescriptorSpecializationColor {
+        type ValueType = [f32; 4];
+
+        unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t, default_value: &Self::ValueType) -> Self::ValueType {
+            obs_data_set_default_int(data, name, vec4_to_rgba(*default_value) as i64);
+            vec4_from_rgba(obs_data_get_int(data, name) as u32)
+        }
+
+        unsafe fn set_property_value(name: *const c_char, data: *mut obs_data_t, value: Self::ValueType) {
+            obs_data_set_int(data, name, vec4_to_rgba(value) as i64)
         }
     }
 
