@@ -195,6 +195,9 @@ impl<T, C: Context, S: ContextDependentState> Drop for ContextDependent<T, C, S>
                 std::any::type_name::<C>(),
             );
 
+            #[cfg(debug_assertions)]
+            println!("{:?}", backtrace::Backtrace::new());
+
             if let Some(_context) = C::enter() {
                 unsafe {
                     ManuallyDrop::drop(data);
