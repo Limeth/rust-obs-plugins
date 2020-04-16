@@ -1,6 +1,8 @@
 use std::io::Write;
 use std::fmt::Debug;
 use std::path::PathBuf;
+use std::ops::{Deref, DerefMut};
+use std::str::FromStr;
 use obs_sys::{
     obs_properties_create, obs_properties_destroy,
     obs_data_t, obs_properties_t, obs_property_t,
@@ -18,7 +20,7 @@ use serde_json::Value;
 pub mod property_descriptors {
     use super::*;
 
-    pub trait PropertyDescriptorSpecialization: Sized {
+    pub trait PropertyDescriptorSpecialization: Sized + Clone {
         unsafe fn create_property(
             &self,
             name: *const c_char,
@@ -323,28 +325,75 @@ pub mod property_descriptors {
     #[derive(Clone)]
     pub struct PropertyDescriptorSpecializationColor;
 
-    /// As defined in vec4.h:
-    /// static inline void vec4_from_rgba(struct vec4 *dst, uint32_t rgba)
-    fn vec4_from_rgba(mut rgba: u32) -> [f32; 4] {
-        let x = ((rgba & u8::MAX as u32) as f32 / u8::MAX as f32) as f32;
-        rgba >>= 8;
-        let y = ((rgba & u8::MAX as u32) as f32 / u8::MAX as f32) as f32;
-        rgba >>= 8;
-        let z = ((rgba & u8::MAX as u32) as f32 / u8::MAX as f32) as f32;
-        rgba >>= 8;
-        let w = ((rgba & u8::MAX as u32) as f32 / u8::MAX as f32) as f32;
-        [x, y, z, w]
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Color(pub [f32; 4]);
+
+    impl Color {
+        pub fn reversed(&self) -> Color {
+            Color([self.0[3], self.0[2], self.0[1], self.0[0]])
+        }
     }
 
-    /// As defined in vec4.h:
-    /// static inline uint32_t vec4_to_rgba(const struct vec4 *src)
-    fn vec4_to_rgba(src: [f32; 4]) -> u32 {
-        let mut val = 0;
-        val |= ((src[0] as f32 * u8::MAX as f32) as u32) << 0;
-        val |= ((src[1] as f32 * u8::MAX as f32) as u32) << 8;
-        val |= ((src[2] as f32 * u8::MAX as f32) as u32) << 16;
-        val |= ((src[3] as f32 * u8::MAX as f32) as u32) << 24;
-        val
+    impl FromStr for Color {
+        type Err = std::num::ParseIntError;
+
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            u32::from_str_radix(s, 16).map(|rgba| Color::from(rgba).reversed())
+        }
+    }
+
+    impl From<[f32; 4]> for Color {
+        fn from(inner: [f32; 4]) -> Self {
+            Color(inner)
+        }
+    }
+
+    impl From<u32> for Color {
+        /// As defined in vec4.h:
+        /// static inline void vec4_from_rgba(struct vec4 *dst, uint32_t rgba)
+        fn from(mut rgba: u32) -> Self {
+            let x = ((rgba & u8::MAX as u32) as f32 / u8::MAX as f32) as f32;
+            rgba >>= 8;
+            let y = ((rgba & u8::MAX as u32) as f32 / u8::MAX as f32) as f32;
+            rgba >>= 8;
+            let z = ((rgba & u8::MAX as u32) as f32 / u8::MAX as f32) as f32;
+            rgba >>= 8;
+            let w = ((rgba & u8::MAX as u32) as f32 / u8::MAX as f32) as f32;
+            [x, y, z, w].into()
+        }
+    }
+
+    impl From<Color> for [f32; 4] {
+        fn from(src: Color) -> Self {
+            src.0
+        }
+    }
+
+    impl From<Color> for u32 {
+        /// As defined in vec4.h:
+        /// static inline uint32_t vec4_to_rgba(const struct vec4 *src)
+        fn from(src: Color) -> Self {
+            let mut val = 0;
+            val |= ((src[0] as f32 * u8::MAX as f32) as u32) << 0;
+            val |= ((src[1] as f32 * u8::MAX as f32) as u32) << 8;
+            val |= ((src[2] as f32 * u8::MAX as f32) as u32) << 16;
+            val |= ((src[3] as f32 * u8::MAX as f32) as u32) << 24;
+            val
+        }
+    }
+
+    impl Deref for Color {
+        type Target = [f32; 4];
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl DerefMut for Color {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.0
+        }
     }
 
     impl PropertyDescriptorSpecialization for PropertyDescriptorSpecializationColor {
@@ -363,15 +412,15 @@ pub mod property_descriptors {
     }
 
     impl ValuePropertyDescriptorSpecialization for PropertyDescriptorSpecializationColor {
-        type ValueType = [f32; 4];
+        type ValueType = Color;
 
         unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t, default_value: &Self::ValueType) -> Self::ValueType {
-            obs_data_set_default_int(data, name, vec4_to_rgba(*default_value) as i64);
-            vec4_from_rgba(obs_data_get_int(data, name) as u32)
+            obs_data_set_default_int(data, name, u32::from(default_value.clone()) as i64);
+            Color::from(obs_data_get_int(data, name) as u32)
         }
 
         unsafe fn set_property_value(name: *const c_char, data: *mut obs_data_t, value: Self::ValueType) {
-            obs_data_set_int(data, name, vec4_to_rgba(value) as i64)
+            obs_data_set_int(data, name, u32::from(value) as i64)
         }
     }
 
@@ -396,6 +445,7 @@ pub mod property_descriptors {
 
 pub use property_descriptors::*;
 
+#[derive(Clone)]
 pub struct PropertyDescriptor<T: PropertyDescriptorSpecialization> {
     pub name: CString,
     pub description: CString,
