@@ -26,4 +26,6 @@ fn main() {
         println!("cargo:warning=This could result in a library that doesn't work.");
         fs::copy("generated/bindings.rs", out_path).expect("Could not copy bindings!");
     }
+
+    println!("cargo:rustc-link-lib=dylib=obs");
 }
