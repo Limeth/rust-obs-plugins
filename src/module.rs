@@ -1,5 +1,5 @@
 use crate::source::{traits::Sourceable, SourceInfo, SourceInfoBuilder};
-use obs_sys::{obs_module_t, obs_register_source_s, obs_source_info};
+use obs_sys::{obs_module_t, obs_register_source_s, obs_source_info, size_t};
 use std::marker::PhantomData;
 use std::ffi::CStr;
 
@@ -26,7 +26,7 @@ impl LoadContext {
     pub fn register_source(&mut self, source: SourceInfo) {
         let pointer = unsafe {
             let pointer = source.into_raw();
-            obs_register_source_s(pointer, std::mem::size_of::<obs_source_info>() as u64);
+            obs_register_source_s(pointer, std::mem::size_of::<obs_source_info>() as size_t);
             pointer
         };
         self.sources.push(pointer);
