@@ -1,11 +1,14 @@
 use std::fmt::Debug;
 use std::mem;
+use std::mem::MaybeUninit;
+use std::borrow::Cow;
 use std::ffi::{CStr, CString};
-use std::os::raw::c_void;
+use std::os::raw::{c_void, c_char};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use core::convert::TryFrom;
 use obs_sys::{
+    bfree,
     size_t,
     graphics_t,
     gs_get_context,
@@ -325,14 +328,23 @@ pub struct GraphicsEffect {
 }
 
 impl GraphicsEffect {
-    pub fn from_effect_string<'a>(value: &CStr, name: &CStr, context: &'a GraphicsContext) -> Option<GraphicsContextDependentEnabled<'a, Self>> {
+    pub fn from_effect_string<'a>(value: &CStr, name: &CStr, context: &'a GraphicsContext) -> Result<GraphicsContextDependentEnabled<'a, Self>, Option<Cow<'static, str>>> {
         unsafe {
-            let raw = gs_effect_create(value.as_ptr(), name.as_ptr(), std::ptr::null_mut());
+            let mut error_string_raw: *mut c_char = std::ptr::null_mut();
+            let raw = gs_effect_create(value.as_ptr(), name.as_ptr(), &mut error_string_raw as *mut *mut c_char);
 
             if raw.is_null() {
-                None
+                if error_string_raw == std::ptr::null_mut() {
+                    Err(None)
+                } else {
+                    let error_string = CStr::from_ptr(error_string_raw).to_string_lossy().to_string();
+
+                    bfree(error_string_raw as *mut _);
+
+                    Err(Some(Cow::Owned(error_string)))
+                }
             } else {
-                Some(ContextDependent::new(Self { raw }, context))
+                Ok(ContextDependent::new(Self { raw }, context))
             }
         }
     }

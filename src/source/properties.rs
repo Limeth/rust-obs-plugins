@@ -20,7 +20,7 @@ use serde_json::Value;
 pub mod property_descriptors {
     use super::*;
 
-    pub trait PropertyDescriptorSpecialization: Sized + Clone {
+    pub trait PropertyDescriptorSpecialization: Sized {
         unsafe fn create_property(
             &self,
             name: *const c_char,
@@ -197,18 +197,15 @@ pub mod property_descriptors {
     }
 
     impl ValuePropertyDescriptorSpecialization for PropertyDescriptorSpecializationString {
-        type ValueType = String;
+        type ValueType = CString;
 
         unsafe fn get_property_value(name: *const c_char, data: *mut obs_data_t, default_value: &Self::ValueType) -> Self::ValueType {
-            let c_string = CString::new(default_value.as_str()).expect("Could not convert string to C string.");
-
-            obs_data_set_default_string(data, name, c_string.as_ptr());
-            CStr::from_ptr(obs_data_get_string(data, name)).to_string_lossy().to_string()
+            obs_data_set_default_string(data, name, default_value.as_ptr());
+            CString::new(CStr::from_ptr(obs_data_get_string(data, name)).to_bytes()).unwrap()
         }
 
         unsafe fn set_property_value(name: *const c_char, data: *mut obs_data_t, value: Self::ValueType) {
-            let c_string = CString::new(value).expect("Could not convert string to C string.");
-            obs_data_set_string(data, name, c_string.as_ptr());
+            obs_data_set_string(data, name, value.as_ptr());
         }
     }
 
@@ -437,10 +434,7 @@ pub mod property_descriptors {
     }
     #[derive(Clone)]
     pub struct PropertyDescriptorSpecializationFrameRate {}
-    pub struct PropertyDescriptorSpecializationGroup {
-        // Make sure not to `drop` the Properties
-        pub properties: Properties,
-    }
+    pub struct PropertyDescriptorSpecializationGroup {}
 }
 
 pub use property_descriptors::*;
@@ -473,6 +467,12 @@ impl Properties {
 
     pub(crate) unsafe fn as_raw(&self) -> *mut obs_properties_t {
         self.inner
+    }
+
+    pub(crate) unsafe fn leak(self) -> *mut obs_properties_t {
+        let inner = self.inner;
+        std::mem::forget(self);
+        inner
     }
 
     pub fn add_property<T: PropertyDescriptorSpecialization>(&mut self, descriptor: &PropertyDescriptor<T>) {
