@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::ops::{Deref, DerefMut};
@@ -20,7 +19,7 @@ use serde_json::Value;
 pub mod property_descriptors {
     use super::*;
 
-    pub trait PropertyDescriptorSpecialization: Sized {
+    pub trait PropertyDescriptorSpecialization: Sized + Debug {
         unsafe fn create_property(
             &self,
             name: *const c_char,
@@ -36,7 +35,7 @@ pub mod property_descriptors {
         unsafe fn set_property_value(name: *const c_char, data: *mut obs_data_t, value: Self::ValueType);
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct PropertyDescriptorSpecializationBool {}
 
     impl PropertyDescriptorSpecialization for PropertyDescriptorSpecializationBool {
@@ -67,7 +66,7 @@ pub mod property_descriptors {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct PropertyDescriptorSpecializationI32 {
         pub min: i32,
         pub max: i32,
@@ -117,7 +116,7 @@ pub mod property_descriptors {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct PropertyDescriptorSpecializationF64 {
         pub min: f64,
         pub max: f64,
@@ -168,14 +167,14 @@ pub mod property_descriptors {
     }
 
     #[repr(u32)]
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Debug)]
     pub enum StringType {
         Default,
         Password,
         Multiline,
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct PropertyDescriptorSpecializationString {
         pub string_type: StringType,
     }
@@ -210,14 +209,14 @@ pub mod property_descriptors {
     }
 
     #[repr(u32)]
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Debug)]
     pub enum PathType {
         File,
         FileSave,
         Directory,
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct PropertyDescriptorSpecializationPath {
         pub path_type: PathType,
         pub filter: CString,
@@ -283,6 +282,12 @@ pub mod property_descriptors {
         callback: Arc<Box<dyn Fn() -> bool>>,
     }
 
+    impl Debug for PropertyDescriptorSpecializationButton {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("PropertyDescriptorSpecializationButton").finish()
+        }
+    }
+
     impl PropertyDescriptorSpecializationButton {
         /// Callback for when a button property is clicked. If the properties
         /// need to be refreshed due to changes to the property layout, return true,
@@ -319,7 +324,7 @@ pub mod property_descriptors {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct PropertyDescriptorSpecializationColor;
 
     #[derive(Clone, Debug, PartialEq)]
@@ -422,24 +427,25 @@ pub mod property_descriptors {
     }
 
     // TODO: Implement the property kinds below
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct PropertyDescriptorSpecializationList {
         // TODO
     }
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct PropertyDescriptorSpecializationFont {}
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct PropertyDescriptorSpecializationListEditable {
         // TODO
     }
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct PropertyDescriptorSpecializationFrameRate {}
+    #[derive(Clone, Debug)]
     pub struct PropertyDescriptorSpecializationGroup {}
 }
 
 pub use property_descriptors::*;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PropertyDescriptor<T: PropertyDescriptorSpecialization> {
     pub name: CString,
     pub description: CString,
