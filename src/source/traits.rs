@@ -89,6 +89,22 @@ pub trait VideoTickSource<D> {
     fn video_tick(context: PluginContext<D>, seconds: f32);
 }
 
+pub trait ActivateSource<D> {
+    fn activate(context: PluginContext<D>);
+}
+
+pub trait DeactivateSource<D> {
+    fn deactivate(context: PluginContext<D>);
+}
+
+pub trait ShowSource<D> {
+    fn show(context: PluginContext<D>);
+}
+
+pub trait HideSource<D> {
+    fn hide(context: PluginContext<D>);
+}
+
 pub trait EnumActiveSource<D> {
     fn enum_active_sources(context: PluginContext<D>, context: &EnumActiveContext);
 }

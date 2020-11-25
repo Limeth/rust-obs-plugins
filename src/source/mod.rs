@@ -273,6 +273,10 @@ impl_source_builder! {
     video_render => VideoRenderSource
     audio_render => AudioRenderSource
     get_properties => GetPropertiesSource
+    activate => ActivateSource
+    deactivate => DeactivateSource
+    show => ShowSource
+    hide => HideSource
     enum_active_sources => EnumActiveSource
     enum_all_sources => EnumAllSource
     transition_start => TransitionStartSource

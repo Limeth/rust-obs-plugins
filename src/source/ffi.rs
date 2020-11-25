@@ -125,6 +125,38 @@ pub unsafe extern "C" fn get_properties<D, F: GetPropertiesSource<D>>(
     properties_ptr
 }
 
+pub unsafe extern "C" fn activate<D, F: ActivateSource<D>>(
+    data: *mut ::std::os::raw::c_void,
+) {
+    let context = PluginContext::<D>::from(data);
+
+    F::activate(context);
+}
+
+pub unsafe extern "C" fn deactivate<D, F: DeactivateSource<D>>(
+    data: *mut ::std::os::raw::c_void,
+) {
+    let context = PluginContext::<D>::from(data);
+
+    F::deactivate(context);
+}
+
+pub unsafe extern "C" fn show<D, F: ShowSource<D>>(
+    data: *mut ::std::os::raw::c_void,
+) {
+    let context = PluginContext::<D>::from(data);
+
+    F::show(context);
+}
+
+pub unsafe extern "C" fn hide<D, F: HideSource<D>>(
+    data: *mut ::std::os::raw::c_void,
+) {
+    let context = PluginContext::<D>::from(data);
+
+    F::hide(context);
+}
+
 pub unsafe extern "C" fn enum_active_sources<D, F: EnumActiveSource<D>>(
     data: *mut ::std::os::raw::c_void,
     _enum_callback: obs_source_enum_proc_t,
